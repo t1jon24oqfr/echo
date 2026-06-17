@@ -21,7 +21,7 @@ services:
     source_dir: api
     dockerfile_path: Dockerfile
     github:
-      repo: REPLACE_ME/echo
+      repo: t1jon24oqfr/echo
       branch: main
       deploy_on_push: true
     http_port: 3048
@@ -140,7 +140,7 @@ services:
     instance_size_slug: basic-xs
     source_dir: web
     github:
-      repo: REPLACE_ME/echo
+      repo: t1jon24oqfr/echo
       branch: main
       deploy_on_push: true
     build_command: npm run build
