@@ -1,0 +1,7 @@
+# Echo — realism feature pack (contract for backend+frontend agents)
+
+Goal: chat must feel like a real messenger relationship, not a request/response bot.
+Repos: backend `/Volumes/Games/1M/persona-app/api` (NestJS :3048, Prisma sqlite, engine in src/engine, fal via FAL_KEY, OpenRouter via OPENROUTER_API_KEY). Frontend `/Volumes/Games/1M/persona-app/web` (Next :3047, light Telegram-style, EN copy, api client src/lib/api.ts, token header x-device-token). Existing contract: ../API_CONTRACT.md. npm cache prefix: npm_config_cache=/Volumes/Games/1M/.npmcache. Keep design/copy style; all new user-facing copy in English.
+
+## 1. Photo FROM user (vision)
+- BE: `POST /personas/:id/chat-photo` multipart field `photo` (+ optional text field `caption`). Save as Photo kind 'received'. Run vision model `VISION_MODEL` env (default `qwen/qwen2.5-vl-72b-instruct`) via OpenRouter chat/completions with image_url (base64 data URI) → short description. Persist user ChatMessage `content = caption || '📷 photo'`, plus hidden context: store description in a new ChatMessage column `meta` (Json string, e.g. {photoFile, photoDesc}). Then run the normal persona reply pipeline (system prompt gets an extra line: "${userA

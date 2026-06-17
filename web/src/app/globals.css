@@ -1,0 +1,294 @@
+:root {
+  --bg: #EFEFF4;
+  --bg-2: #FFFFFF;
+  --text: #0A0A0E;
+  --text-dim: rgba(60, 60, 67, 0.6);
+  --accent: #007aff;
+  --card: #ffffff;
+  --glass: rgba(255, 255, 255, 0.66);
+  --glass-strong: rgba(249, 249, 251, 0.8);
+  --glass-border: rgba(0, 0, 0, 0.06);
+  --glass-highlight: rgba(255, 255, 255, 0.9);
+  --glass-depth: inset 0 1px 0 var(--glass-highlight), 0 8px 24px rgba(0, 0, 0, 0.1);
+  --card-shadow: 0 1px 1px rgba(0, 0, 0, 0.03), 0 4px 18px rgba(0, 0, 0, 0.05);
+  --solid-bubble: var(--accent);
+  --radius: 18px;
+  --radius-lg: 26px;
+  /* On-screen keyboard inset, kept up to date by template.tsx (0 when closed). */
+  --kb: 0px;
+}
+
+@keyframes ambient-drift {
+  0% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(36px, -28px) scale(1.12);
+  }
+  100% {
+    transform: translate(-24px, 22px) scale(0.96);
+  }
+}
+
+.ambient-blob {
+  animation: ambient-drift 22s ease-in-out infinite alternate;
+}
+
+.ambient-blob.slow {
+  animation-duration: 30s;
+  animation-delay: -8s;
+}
+
+.ambient-blob.slower {
+  animation-duration: 38s;
+  animation-delay: -16s;
+}
+
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.page-enter {
+  animation: page-enter 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes bubble-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.bubble-in {
+  animation: bubble-in 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.pop-in {
+  animation: pop-in 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes skeleton-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* Loading placeholder block: an animated gradient sweep. Give it a width/height
+   and (optionally) a border-radius at the call site. */
+.skeleton {
+  background: linear-gradient(
+    100deg,
+    rgba(120, 120, 128, 0.1) 25%,
+    rgba(120, 120, 128, 0.2) 50%,
+    rgba(120, 120, 128, 0.1) 75%
+  );
+  background-size: 200% 100%;
+  border-radius: var(--radius);
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-enter,
+  .bubble-in,
+  .pop-in,
+  .ambient-blob,
+  .skeleton {
+    animation: none;
+  }
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  /* Kill the grey flash on tap for touch UIs (we render our own :active states). */
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Keyboard-only focus ring: visible for keyboard nav, suppressed for
+   pointer/touch interaction so taps don't leave a lingering outline. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, var(--font-sans),
+    system-ui, sans-serif;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+@media (min-width: 480px) {
+  body {
+    background: #e4e4ea;
+  }
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button {
+  font-family: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: transform 0.16s ease, opacity 0.16s ease, background-color 0.16s ease;
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+a {
+  transition: opacity 0.16s ease, background-color 0.16s ease, color 0.16s ease;
+}
+
+.btn-solid:active,
+.btn-glass:active {
+  transform: scale(0.97);
+}
+
+input,
+textarea {
+  font-family: inherit;
+}
+
+img {
+  max-width: 100%;
+  display: block;
+}
+
+.phone {
+  max-width: 430px;
+  margin: 0 auto;
+  height: 100dvh;
+  position: relative;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.phone::-webkit-scrollbar {
+  display: none;
+}
+
+@media (min-width: 480px) {
+  .phone {
+    border-left: 1px solid rgba(0, 0, 0, 0.06);
+    border-right: 1px solid rgba(0, 0, 0, 0.06);
+  }
+}
+
+.glass {
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-depth);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  border-radius: var(--radius);
+}
+
+.glass-strong {
+  background: var(--glass-strong);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-depth);
+  backdrop-filter: blur(32px) saturate(180%);
+  -webkit-backdrop-filter: blur(32px) saturate(180%);
+  border-radius: var(--radius);
+}
+
+.card {
+  background: var(--card);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--card-shadow);
+}
+
+.btn-glass {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 48px;
+  padding: 0 24px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-depth);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.btn-solid {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 48px;
+  padding: 0 24px;
+  border-radius: 24px;
+  background: var(--accent);
+  border: none;
+  color: #ffffff;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .glass,
+  .glass-strong,
+  .btn-glass {
+    background: #f6f6f8;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}

@@ -1,0 +1,27 @@
+# deps / build
+**/node_modules/
+**/dist/
+**/.next/
+**/out/
+
+# secrets & local config
+**/.env
+**/.env.local
+**/.env.*.local
+.env
+
+# local data / db / media (durability is Postgres + R2 in prod)
+api/data/
+web/data/
+!web/data/.gitkeep
+api/prisma/*.db
+api/prisma/*.db-journal
+api/prisma/*.db-wal
+api/prisma/*.db-shm
+proto/data/
+
+# misc
+*.log
+.DS_Store
+.npmcache/
+/tmp/

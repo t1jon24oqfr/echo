@@ -1,0 +1,12 @@
+node_modules/
+.next/
+data/
+.env
+.env.*
+*.tsbuildinfo
+.git/
+.gitignore
+npm-debug.log
+*.log
+.DS_Store
+README.md

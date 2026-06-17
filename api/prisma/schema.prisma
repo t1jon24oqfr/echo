@@ -1,0 +1,192 @@
+// Echo — Prisma schema (SQLite for dev, Postgres-compatible: Json fields stored as String columns containing JSON)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String             @id @default(cuid())
+  deviceToken   String             @unique
+  createdAt     DateTime           @default(now())
+  personas      Persona[]
+  pushSubs      PushSubscription[]
+}
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Persona {
+  id            String        @id @default(cuid())
+  userId        String
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name          String
+  relationship  String
+  mode          String // 'memorial' | 'reconnect'
+  description   String?
+  ambient       String? // JSON array
+  status        String        @default("draft") // 'draft'|'ingested'|'building'|'ready'|'failed'
+  stage         String?
+  avatarFile    String? // canonical avatar (Photo.file with kind 'avatar')
+  demo          Boolean       @default(false)
+  personaAuthor String?
+  userAuthor    String?
+  voiceId       String? // cloned voice id once a sample is processed
+  voiceGender   String? // 'female' | 'male' — drives preset voice fallback
+  voiceSampleFile String? // stored her-voice sample filename
+  stats         String? // JSON CorpusStats
+  card          String? // JSON PersonaCard
+  exemplars     String? // JSON string[]
+  lastUserAt    DateTime?
+  lastPersonaAt DateTime?
+  nextNudgeAt   DateTime?
+  passport      String? // JSON CharacterPassport (Phase 1 — see src/engine/passport.ts)
+  passportVersion Int         @default(1)
+  timezone      String        @default("Europe/Kyiv")
+  createdAt     DateTime      @default(now())
+  memories      Memory[]
+  photos        Photo[]
+  messages      ChatMessage[]
+  // Phase 2 — inner-life state engine
+  state         PersonaState?
+  agendas       DailyAgenda[]
+  affectEvents  AffectEvent[]
+}
+
+model Memory {
+  id        String  @id @default(cuid())
+  personaId String
+  persona   Persona @relation(fields: [personaId], references: [id], onDelete: Cascade)
+  text      String
+  keywords  String // JSON string[]
+  date      String?
+  importance Int    @default(5) // 1..10 poignancy (heuristic at write time)
+  // Phase 2 — additive, defaulted so no backfill needed (design spec §2):
+  kind           String   @default("episodic") // 'episodic'|'reflection'|'fact'
+  emotionTag     String? // octant word at write time (nightly reflection / appraisal)
+  lastAccessedAt DateTime @default(now()) // recency term for retrieval
+  // Phase 3 — Generative-Agents retrieval: a JSON float[] vector embedded once
+  // at write-time (EMBED_MODEL). Nullable so existing rows lazily backfill and
+  // retrieval falls back to the keyword tokens() matcher when absent.
+  embedding      String? // JSON number[] embedding vector
+  createdAt      DateTime @default(now())
+}
+
+model Photo {
+  id        String   @id @default(cuid())
+  personaId String
+  persona   Persona  @relation(fields: [personaId], references: [id], onDelete: Cascade)
+  file      String
+  kind      String // 'upload' | 'selfie' | 'avatar'
+  createdAt DateTime @default(now())
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  personaId String
+  persona   Persona  @relation(fields: [personaId], references: [id], onDelete: Cascade)
+  role      String // 'user' | 'assistant'
+  content   String
+  kind      String   @default("text") // 'text' | 'image' | 'voice' | 'selfie'
+  imageFile String?
+  audioFile String?
+  transcript String?
+  proactive Boolean  @default(false)
+  readAt    DateTime?
+  createdAt DateTime @default(now())
+}
+
+// ===== Phase 2 — Inner-Life State Engine (design spec §2) =====
+
+// One row per persona: the persistent inner life (PAD mood + cached baseline,
+// active-emotion JSON list, closeness + stage, two-process sleep params,
+// compute-on-read bookkeeping + version optimistic lock, reflection accumulator).
+// Octant labels and energy are DERIVED at read time, never stored.
+model PersonaState {
+  personaId String  @id
+  persona   Persona @relation(fields: [personaId], references: [id], onDelete: Cascade)
+
+  // --- Mood (PAD, each axis [-1,1]) — the persistent inner life ---
+  moodP Float @default(0)
+  moodA Float @default(0)
+  moodD Float @default(0)
+  // --- Baseline (computed once from Passport OCEAN; cached so reads need no recompute) ---
+  baseP Float @default(0)
+  baseA Float @default(0)
+  baseD Float @default(0)
+
+  // --- Active emotions: JSON [{type,intensity,p,a,d,halflifeMin,createdAt}] ---
+  emotions String @default("[]")
+
+  // --- Relationship closeness [0,100] + Ebbinghaus strength term ---
+  closeness     Float @default(40)
+  peakCloseness Float @default(40)
+  stage         Int   @default(1) // 1..5 Social-Penetration tier (hysteresis-classified)
+
+  // --- Energy / two-process sleep model (stored params; energy itself is recomputed) ---
+  sleepPressureS Float    @default(0.3) // homeostatic S in [0,1] at lastWakeAt/lastSleepAt
+  lastWakeAt     DateTime @default(now())
+  lastSleepAt    DateTime?
+  asleep         Boolean  @default(false)
+
+  // --- Compute-on-read bookkeeping ---
+  stateAt      DateTime @default(now()) // last integration timestamp
+  lastDecayDay String? // YYYY-MM-DD guard so closeness decay runs once/day
+  version      Int      @default(0) // optimistic lock — updateMany where {personaId,version}
+
+  // --- Reflection accumulator (Generative Agents) ---
+  importanceSinceReflect Int       @default(0)
+  lastReflectAt          DateTime?
+
+  updatedAt DateTime @updatedAt
+
+  @@index([stateAt])
+}
+
+// Lazy daily plan: one row per persona per local day. Blocks are contiguous and
+// sum to 1440 incl. a wrap-around sleep block. byLLM=false = cloned/jittered
+// from a same-weekday template (Agentic Plan Caching).
+model DailyAgenda {
+  id          String  @id @default(cuid())
+  personaId   String
+  persona     Persona @relation(fields: [personaId], references: [id], onDelete: Cascade)
+  localDate   String // YYYY-MM-DD in persona tz
+  timezone    String // IANA tz string (e.g. "Europe/Kyiv")
+  blocks      String // JSON [{activity,label,startMin,durMin,valence,arousal,busy}]
+  seedSummary String? // yesterday's reflection summary that seeded this day
+  byLLM       Boolean @default(false)
+  createdAt   DateTime @default(now())
+
+  @@unique([personaId, localDate])
+}
+
+// Append-only audit so closeness/mood are reconstructable, never a mystery number.
+// Prune >30d (mirror DB-retention memory note).
+model AffectEvent {
+  id          String  @id @default(cuid())
+  personaId   String
+  persona     Persona @relation(fields: [personaId], references: [id], onDelete: Cascade)
+  kind        String // 'user_warm'|'ignored'|'sim_good'|'sim_bad'|'reengage'|...
+  emotionType String? // joy|sadness|anger|... (null for pure closeness events)
+  dP          Float   @default(0)
+  dA          Float   @default(0)
+  dD          Float   @default(0)
+  dCloseness  Float   @default(0)
+  importance  Int     @default(1) // 1..10
+  createdAt   DateTime @default(now())
+
+  @@index([personaId, createdAt])
+}

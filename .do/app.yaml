@@ -1,0 +1,171 @@
+# DigitalOcean App Platform spec for Echo (brand text: "ECHO").
+# Hosting domains: exchat.ai (web) + api.exchat.ai (api). Estate DO account,
+# separate project. Committed for Step B (see DEPLOY.md). Apply with:
+#   doctl apps create --spec .do/app.yaml          (first time)
+#   doctl apps update <APP_ID> --spec .do/app.yaml  (subsequent)
+#
+# App Platform containers have an EPHEMERAL filesystem: durability comes from the
+# managed Postgres (below) + Cloudflare R2 (STORAGE_DRIVER=r2). Nothing on local
+# disk survives a deploy/restart.
+name: echo
+region: nyc
+
+services:
+  # ---- API (NestJS, Dockerfile) ----
+  - name: api
+    # instance_count MUST stay 1: the EVERY_MINUTE proactive cron is
+    # single-instance (a second pod would double-fire nudges).
+    instance_count: 1
+    instance_size_slug: basic-xs
+    # dockerfile_path is relative to source_dir; the build context is api/.
+    source_dir: api
+    dockerfile_path: Dockerfile
+    github:
+      repo: REPLACE_ME/echo
+      branch: main
+      deploy_on_push: true
+    http_port: 3048
+    health_check:
+      http_path: /health
+      initial_delay_seconds: 30
+      period_seconds: 15
+      failure_threshold: 5
+    routes:
+      - path: /
+    envs:
+      - key: PORT
+        scope: RUN_TIME
+        value: "3048"
+      - key: DATABASE_URL
+        scope: RUN_AND_BUILD_TIME
+        value: ${echo-db.DATABASE_URL}
+      - key: CORS_ORIGIN
+        scope: RUN_TIME
+        value: https://exchat.ai
+      # ---- Object storage (Cloudflare R2, PRIVATE bucket) ----
+      - key: STORAGE_DRIVER
+        scope: RUN_TIME
+        value: r2
+      - key: R2_ENDPOINT
+        scope: RUN_TIME
+        value: https://REPLACE_ME.r2.cloudflarestorage.com
+      - key: R2_BUCKET
+        scope: RUN_TIME
+        value: echo-media
+      - key: R2_REGION
+        scope: RUN_TIME
+        value: auto
+      - key: R2_ACCESS_KEY_ID
+        scope: RUN_TIME
+        type: SECRET
+        value: REPLACE_ME
+      - key: R2_SECRET_ACCESS_KEY
+        scope: RUN_TIME
+        type: SECRET
+        value: REPLACE_ME
+      # ---- LLM / embeddings (OpenRouter) ----
+      - key: OPENROUTER_API_KEY
+        scope: RUN_TIME
+        type: SECRET
+        value: REPLACE_ME
+      - key: OPENAI_BASE_URL
+        scope: RUN_TIME
+        value: https://openrouter.ai/api/v1
+      - key: EXTRACT_MODEL
+        scope: RUN_TIME
+        value: deepseek/deepseek-chat
+      - key: CHAT_MODEL
+        scope: RUN_TIME
+        value: deepseek/deepseek-chat
+      - key: VISION_MODEL
+        scope: RUN_TIME
+        value: qwen/qwen3-vl-8b-instruct
+      - key: EMBED_MODEL
+        scope: RUN_TIME
+        type: SECRET
+        value: openai/text-embedding-3-small
+      - key: MAX_MEMORY_CALLS
+        scope: RUN_TIME
+        value: "12"
+      # ---- fal.ai (selfie edit, STT, TTS, voice clone) ----
+      - key: FAL_KEY
+        scope: RUN_TIME
+        type: SECRET
+        value: REPLACE_ME
+      - key: FAL_EDIT_MODEL
+        scope: RUN_TIME
+        value: fal-ai/qwen-image-edit
+      - key: FAL_STT_MODEL
+        scope: RUN_TIME
+        value: fal-ai/whisper
+      - key: FAL_TTS_MODEL
+        scope: RUN_TIME
+        value: fal-ai/elevenlabs/tts/multilingual-v2
+      - key: FAL_TTS_VOICE_FEMALE
+        scope: RUN_TIME
+        value: Sarah
+      - key: FAL_TTS_VOICE_MALE
+        scope: RUN_TIME
+        value: Brian
+      - key: FAL_VOICE_CLONE_MODEL
+        scope: RUN_TIME
+        value: fal-ai/minimax/voice-clone
+      - key: FAL_TTS_CLONE_MODEL
+        scope: RUN_TIME
+        value: fal-ai/minimax/speech-02-hd
+      # ---- proactive nudge tuning ----
+      - key: NUDGE_MIN_MIN
+        scope: RUN_TIME
+        value: "20"
+      - key: NUDGE_MAX_MIN
+        scope: RUN_TIME
+        value: "90"
+      # ---- Web Push (VAPID) ----
+      - key: VAPID_PUBLIC_KEY
+        scope: RUN_TIME
+        type: SECRET
+        value: REPLACE_ME
+      - key: VAPID_PRIVATE_KEY
+        scope: RUN_TIME
+        type: SECRET
+        value: REPLACE_ME
+      - key: VAPID_SUBJECT
+        scope: RUN_TIME
+        type: SECRET
+        value: mailto:hello@exchat.ai
+
+  # ---- Web (Next.js). Node buildpack here; swap to a Dockerfile if preferred. ----
+  - name: web
+    instance_count: 1
+    instance_size_slug: basic-xs
+    source_dir: web
+    github:
+      repo: REPLACE_ME/echo
+      branch: main
+      deploy_on_push: true
+    build_command: npm run build
+    run_command: npm run start
+    http_port: 3047
+    routes:
+      - path: /
+    envs:
+      # Injected at BUILD time — Next inlines NEXT_PUBLIC_* into the bundle.
+      - key: NEXT_PUBLIC_API_URL
+        scope: BUILD_TIME
+        value: https://api.exchat.ai
+
+databases:
+  # Managed Postgres; ${echo-db.DATABASE_URL} above binds to it (sslmode=require).
+  - name: echo-db
+    engine: PG
+    version: "16"
+    production: true
+    cluster_name: echo-db
+
+# Map custom domains. exchat.ai -> web, api.exchat.ai -> api. Routing to the
+# right service is by the ingress rules / per-service domain config in DO.
+domains:
+  - domain: exchat.ai
+    type: PRIMARY
+  - domain: api.exchat.ai
+    type: ALIAS
