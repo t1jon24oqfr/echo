@@ -19,6 +19,14 @@ import type { Presence as StatePresence } from './presence';
 
 type Source = 'telegram' | 'whatsapp' | 'instagram' | 'facebook' | 'line' | 'vk';
 
+// Positioning gate: 'reconnect' clones a LIVING, non-consenting person (GDPR
+// living-data-subject, publicity rights, platform impersonation, processor
+// adjacency). Ship memorial-only — the engine still understands both modes, but
+// a new 'reconnect' persona can only be created when this flag is explicitly on.
+// Default OFF. The frontend hides the option (NEXT_PUBLIC_ALLOW_RECONNECT); this
+// is the backend defense-in-depth so a stale/direct client can't bypass it.
+const ALLOW_RECONNECT = process.env.ALLOW_RECONNECT === 'true';
+
 const PARSERS: Record<Source, (content: string) => Msg[]> = {
   telegram: parseTelegramString,
   whatsapp: parseWhatsAppString,
@@ -235,12 +243,14 @@ export class PersonasService {
   }
 
   async create(userId: string, dto: CreatePersonaDto): Promise<Record<string, unknown>> {
+    // Coerce to memorial unless reconnect is explicitly enabled (see ALLOW_RECONNECT).
+    const mode = dto.mode === 'reconnect' && !ALLOW_RECONNECT ? 'memorial' : dto.mode;
     const persona = await this.prisma.persona.create({
       data: {
         userId,
         name: dto.name,
         relationship: dto.relationship,
-        mode: dto.mode,
+        mode,
         description: dto.description ?? null,
         ambient: dto.ambient ? JSON.stringify(dto.ambient) : null,
         status: 'draft',

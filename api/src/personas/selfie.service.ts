@@ -10,6 +10,8 @@ import { PrismaService } from '../prisma.service';
 import { PersonasService } from './personas.service';
 import { StorageService } from './storage.service';
 import { falEditImage, hasFalKey, MIME_BY_EXT } from './fal-edit';
+import { markGeneratedImage } from './image-mark';
+import { screenGenerationPrompt } from './moderation';
 
 function looksRejected(msg: string): boolean {
   const m = msg.toLowerCase();
@@ -54,11 +56,22 @@ export class SelfieService {
       throw new BadRequestException('Upload at least one photo first');
     }
 
+    // Input screen (AI Act / abuse): refuse disallowed hints before spending fal.
+    const screen = screenGenerationPrompt(hint);
+    if (!screen.allowed) {
+      throw new UnprocessableEntityException({
+        error: 'disallowed_content',
+        message: 'That request is not allowed. Echo only makes respectful, SFW images.',
+      });
+    }
+
     const prompt = `same person, casual phone selfie, ${hint?.trim() || 'relaxed mood'}, natural lighting, realistic`;
 
     const imgBuf = await this.generateWithRetry(personaId, upload.file, prompt);
+    // AI Act Art. 50: mark the synthetic image (machine-readable) before storing.
+    const marked = await markGeneratedImage(imgBuf);
 
-    const file = await this.storage.savePhoto(personaId, `selfie-${Date.now()}.jpg`, imgBuf);
+    const file = await this.storage.savePhoto(personaId, `selfie-${Date.now()}.jpg`, marked);
     await this.prisma.photo.create({ data: { personaId, file, kind: 'selfie' } });
     const msg = await this.prisma.chatMessage.create({
       data: { personaId, role: 'assistant', kind: 'selfie', imageFile: file, content: '' },

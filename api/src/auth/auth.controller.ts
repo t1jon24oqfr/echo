@@ -1,4 +1,5 @@
 import { Body, Controller, HttpCode, HttpException, HttpStatus, Post } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { randomBytes } from 'node:crypto';
 import { IsEmail, IsIn, IsOptional, IsString } from 'class-validator';
 import { PrismaService } from '../prisma.service';
@@ -70,7 +71,10 @@ export class AuthController {
   ) {}
 
   // ---- Legacy anonymous device token (kept during transition) ----
+  // Tight cap: this is the open door — each token grants full access to paid
+  // LLM/fal/TTS, so an unthrottled mint endpoint is a spend bomb.
   @Post('device')
+  @Throttle({ default: { limit: 20, ttl: 3_600_000 } })
   async device(@Body() body: DeviceDto): Promise<{ token: string }> {
     if (body.token) {
       const existing = await this.prisma.user.findUnique({ where: { deviceToken: body.token } });
@@ -83,6 +87,7 @@ export class AuthController {
 
   // ---- Social (Apple / Google) ----
   @Post('social')
+  @Throttle({ default: { limit: 30, ttl: 3_600_000 } })
   async social(@Body() body: SocialDto): Promise<SessionTokens> {
     let verified: VerifiedIdentity;
     try {
@@ -112,7 +117,9 @@ export class AuthController {
   }
 
   // ---- Email magic-link / OTP ----
+  // Each call sends an email (cost + abuse vector) — keep it low per IP.
   @Post('email/start')
+  @Throttle({ default: { limit: 8, ttl: 3_600_000 } })
   @HttpCode(HttpStatus.OK)
   async emailStart(@Body() body: EmailStartDto): Promise<{ ok: true; devCode?: string }> {
     const { result } = await this.emailOtp.start(body.email);
@@ -120,6 +127,7 @@ export class AuthController {
   }
 
   @Post('email/verify')
+  @Throttle({ default: { limit: 20, ttl: 3_600_000 } })
   @HttpCode(HttpStatus.OK)
   async emailVerify(@Body() body: EmailVerifyDto): Promise<SessionTokens> {
     const ok = await this.emailOtp.verify(body.email, body.code);

@@ -7,6 +7,9 @@ import { AppModule } from './app.module';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // Behind the DigitalOcean App Platform ingress: trust the first proxy hop so
+  // req.ip / x-forwarded-for resolve to the real client (used by rate limiting).
+  app.set('trust proxy', 1);
   app.enableCors({
     origin: process.env.CORS_ORIGIN ?? 'http://localhost:3047',
     allowedHeaders: ['Content-Type', 'x-device-token', 'Authorization'],

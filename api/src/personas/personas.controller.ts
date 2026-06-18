@@ -22,6 +22,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileFieldsInterceptor, FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
+import { SkipThrottle, Throttle } from '@nestjs/throttler';
 import { cloneVoice, hasTtsKey, TtsUnavailableError } from '../engine/tts';
 import type { Response } from 'express';
 import { memoryStorage } from 'multer';
@@ -115,6 +116,7 @@ export class PersonasController {
   }
 
   @Post()
+  @Throttle({ default: { limit: 25, ttl: 3_600_000 } })
   create(@Req() req: AuthedRequest, @Body() dto: CreatePersonaDto): Promise<Record<string, unknown>> {
     return this.personas.create(req.user.id, dto);
   }
@@ -165,6 +167,7 @@ export class PersonasController {
   }
 
   @Post(':id/ingest')
+  @Throttle({ default: { limit: 30, ttl: 3_600_000 } })
   ingest(
     @Req() req: AuthedRequest,
     @Param('id') id: string,
@@ -175,6 +178,7 @@ export class PersonasController {
 
   // ---- Visual import (V9): upload a screen recording OR screenshots ----
   @Post(':id/visual-import')
+  @Throttle({ default: { limit: 12, ttl: 3_600_000 } })
   @HttpCode(202)
   @UseInterceptors(
     FileFieldsInterceptor(
@@ -222,6 +226,7 @@ export class PersonasController {
   }
 
   @Post(':id/photos')
+  @Throttle({ default: { limit: 40, ttl: 3_600_000 } })
   @UseInterceptors(
     FilesInterceptor('photos', 12, {
       storage: memoryStorage(),
@@ -250,6 +255,7 @@ export class PersonasController {
   }
 
   @Get(':id/photos/:file')
+  @SkipThrottle()
   async servePhoto(
     @Req() req: AuthedRequest,
     @Param('id') id: string,
@@ -273,6 +279,7 @@ export class PersonasController {
   }
 
   @Post(':id/build')
+  @Throttle({ default: { limit: 15, ttl: 3_600_000 } })
   @HttpCode(202)
   startBuild(@Req() req: AuthedRequest, @Param('id') id: string): Promise<{ status: 'building' }> {
     return this.build.start(req.user.id, id);
@@ -288,6 +295,7 @@ export class PersonasController {
   }
 
   @Post(':id/chat')
+  @Throttle({ default: { limit: 50, ttl: 60_000 } })
   @UseInterceptors(
     FileFieldsInterceptor(
       [
@@ -329,6 +337,7 @@ export class PersonasController {
   }
 
   @Get(':id/audio/:file')
+  @SkipThrottle()
   async serveAudio(
     @Req() req: AuthedRequest,
     @Param('id') id: string,
@@ -370,6 +379,7 @@ export class PersonasController {
   }
 
   @Post(':id/selfie')
+  @Throttle({ default: { limit: 30, ttl: 3_600_000 } })
   takeSelfie(
     @Req() req: AuthedRequest,
     @Param('id') id: string,
@@ -379,6 +389,7 @@ export class PersonasController {
   }
 
   @Post(':id/voice-sample')
+  @Throttle({ default: { limit: 15, ttl: 3_600_000 } })
   @UseInterceptors(
     FileInterceptor('audio', {
       storage: memoryStorage(),

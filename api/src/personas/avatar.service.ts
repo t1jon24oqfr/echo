@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma.service';
 import { PersonasService } from './personas.service';
 import { StorageService } from './storage.service';
 import { falEditImage, hasFalKey, MIME_BY_EXT } from './fal-edit';
+import { markGeneratedImage } from './image-mark';
 
 const PACK_SIZE = 3;
 const AVATAR_PROMPT =
@@ -41,7 +42,9 @@ export class AvatarService {
     for (let i = 0; i < PACK_SIZE; i++) {
       try {
         const imgBuf = await falEditImage(buf, mime, AVATAR_PROMPT);
-        const file = await this.storage.savePhoto(personaId, `avatar-${i + 1}-${Date.now()}.jpg`, imgBuf);
+        // AI Act Art. 50: mark the synthetic portrait (machine-readable) before storing.
+        const marked = await markGeneratedImage(imgBuf);
+        const file = await this.storage.savePhoto(personaId, `avatar-${i + 1}-${Date.now()}.jpg`, marked);
         await this.prisma.photo.create({ data: { personaId, file, kind: 'avatar' } });
         made++;
         if (made === 1) {

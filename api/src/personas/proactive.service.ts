@@ -17,6 +17,10 @@ import { mulberry32, fnv1a, systemClock } from '../engine/state';
 
 const MAX_CONSECUTIVE_PROACTIVE = 3;
 const PUSH_BODY_MAX = 80;
+// Hard per-tick ceiling on proactive LLM generations (cost guardrail). Each due
+// persona can cost one CHAT_MODEL call per tick; cap the batch so a large ready
+// population can't fan out into an unbounded per-minute spend. Env-tunable.
+const NUDGE_BATCH = Math.max(1, Number(process.env.NUDGE_BATCH) || 12);
 
 const NUDGE_INSTRUCTION = `Right now YOU are texting ${'{user}'} first — they have not written for a while and you feel like reaching out. Write ONE short, natural, unprompted message in your exact texting style (you may add a second very short line). Be context-aware: if it has been a long time, a gentle "як ти там? щось зник" in YOUR voice; otherwise just share a thought, a small thing from your day, or ask how they are. Vary the tone, never sound like a template. Output ONLY the literal message text, no narration, no marker tags.`;
 
@@ -42,7 +46,8 @@ export class ProactiveService {
     try {
       due = await this.prisma.persona.findMany({
         where: { status: 'ready', nextNudgeAt: { not: null, lte: now } },
-        take: 25,
+        orderBy: { nextNudgeAt: 'asc' },
+        take: NUDGE_BATCH,
       });
     } catch (e) {
       this.logger.warn(`nudge tick query failed: ${e instanceof Error ? e.message : String(e)}`);

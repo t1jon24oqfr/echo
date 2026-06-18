@@ -10,6 +10,10 @@ const RELATIONSHIP_KEYS = ['who.relPartner', 'who.relFriend', 'who.relFamily', '
 
 export type Mode = 'memorial' | 'reconnect';
 
+// Positioning gate: ship memorial-only. The living-person 'reconnect' mode is
+// hidden unless explicitly enabled (the backend also coerces it off by default).
+const ALLOW_RECONNECT = process.env.NEXT_PUBLIC_ALLOW_RECONNECT === 'true';
+
 export default function StepWho({
   onNext,
 }: {
@@ -86,12 +90,14 @@ export default function StepWho({
           sub={t('who.memorialSub')}
           onClick={() => setMode('memorial')}
         />
-        <ModeOption
-          selected={mode === 'reconnect'}
-          title={t('who.reconnectTitle')}
-          sub={t('who.reconnectSub')}
-          onClick={() => setMode('reconnect')}
-        />
+        {ALLOW_RECONNECT && (
+          <ModeOption
+            selected={mode === 'reconnect'}
+            title={t('who.reconnectTitle')}
+            sub={t('who.reconnectSub')}
+            onClick={() => setMode('reconnect')}
+          />
+        )}
       </div>
 
       {error && (

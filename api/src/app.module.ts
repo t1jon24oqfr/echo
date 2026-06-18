@@ -1,6 +1,9 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerModule } from '@nestjs/throttler';
+import { IpThrottlerGuard } from './common/ip-throttler.guard';
 import { AuthController } from './auth/auth.controller';
 import { DeviceTokenGuard } from './auth/device-token.guard';
 import { JwtService } from './auth/jwt.service';
@@ -30,7 +33,14 @@ import { HealthController } from './health.controller';
 import { PrismaService } from './prisma.service';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), ScheduleModule.forRoot()],
+  imports: [
+    ConfigModule.forRoot({ isGlobal: true }),
+    ScheduleModule.forRoot(),
+    // Blanket anti-abuse/DoS limit per client IP (~200 req/min). Cheap GET byte
+    // routes opt out with @SkipThrottle; expensive paid POSTs tighten it with
+    // @Throttle. In-memory store is fine on the single pod.
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 200 }]),
+  ],
   controllers: [
     AuthController,
     AccountController,
@@ -41,6 +51,7 @@ import { PrismaService } from './prisma.service';
     HealthController,
   ],
   providers: [
+    { provide: APP_GUARD, useClass: IpThrottlerGuard },
     PrismaService,
     DeviceTokenGuard,
     JwtService,
