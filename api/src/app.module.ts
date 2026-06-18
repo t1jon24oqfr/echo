@@ -3,6 +3,12 @@ import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AuthController } from './auth/auth.controller';
 import { DeviceTokenGuard } from './auth/device-token.guard';
+import { JwtService } from './auth/jwt.service';
+import { ClaimService } from './auth/claim.service';
+import { EmailService } from './auth/email.service';
+import { EmailOtpService } from './auth/email-otp.service';
+import { AccountController } from './account/account.controller';
+import { AccountService } from './account/account.service';
 import { PersonasController } from './personas/personas.controller';
 import { InboxController } from './personas/inbox.controller';
 import { PersonasService } from './personas/personas.service';
@@ -25,10 +31,23 @@ import { PrismaService } from './prisma.service';
 
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true }), ScheduleModule.forRoot()],
-  controllers: [AuthController, PersonasController, InboxController, ResetController, PushController, HealthController],
+  controllers: [
+    AuthController,
+    AccountController,
+    PersonasController,
+    InboxController,
+    ResetController,
+    PushController,
+    HealthController,
+  ],
   providers: [
     PrismaService,
     DeviceTokenGuard,
+    JwtService,
+    ClaimService,
+    EmailService,
+    EmailOtpService,
+    AccountService,
     PersonasService,
     BuildService,
     ChatService,

@@ -10,11 +10,62 @@ datasource db {
 }
 
 model User {
-  id            String             @id @default(cuid())
-  deviceToken   String             @unique
-  createdAt     DateTime           @default(now())
-  personas      Persona[]
-  pushSubs      PushSubscription[]
+  id             String             @id @default(cuid())
+  deviceToken    String?            @unique
+  email          String?
+  displayName    String?
+  plan           String             @default("free")
+  ageConfirmedAt DateTime?
+  createdAt      DateTime           @default(now())
+  personas       Persona[]
+  pushSubs       PushSubscription[]
+  identities     Identity[]
+  refreshTokens  RefreshToken[]
+}
+
+// V11 auth — a verified third-party (apple|google) or first-party identity
+// linked onto a User. Keyed on (provider, providerSub); the row is the source
+// of truth for "who owns this account", never the email.
+model Identity {
+  id                  String   @id @default(cuid())
+  userId              String
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider            String // 'apple' | 'google'
+  providerSub         String
+  email               String?
+  emailIsPrivateRelay Boolean  @default(false)
+  appleRefreshToken   String? // Apple returns name/email + refresh token ONCE — persist now
+  createdAt           DateTime @default(now())
+
+  @@unique([provider, providerSub])
+  @@index([userId])
+}
+
+// V11 auth — opaque rotating refresh token, stored hashed. A session = short
+// access JWT (verified statelessly) + this long-lived rotated refresh token.
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+// V11 auth — first-party email magic-link / OTP. codeHash is sha256(code);
+// consumedAt makes it single-use.
+model EmailOtp {
+  id         String    @id @default(cuid())
+  email      String
+  codeHash   String
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([email])
 }
 
 model PushSubscription {

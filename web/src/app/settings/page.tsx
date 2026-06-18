@@ -7,7 +7,7 @@ import AmbientBg from '@/components/AmbientBg';
 import GlassBar from '@/components/GlassBar';
 import GlassCard from '@/components/GlassCard';
 import TabBar from '@/components/persona/TabBar';
-import { listPersonas, resetAll } from '@/lib/api';
+import { listPersonas, resetAll, isSignedIn, getAccount, onAuthChange, type Account } from '@/lib/api';
 import {
   pushSupported,
   currentPermission,
@@ -119,6 +119,83 @@ const BellIcon = () => (
     <path d="M6.6 13.6a1.6 1.6 0 0 0 2.8 0" />
   </IconSquare>
 );
+
+const PersonIcon = () => (
+  <IconSquare color="#007AFF">
+    <circle cx="8" cy="5" r="2.6" />
+    <path d="M3 13.5c0-2.5 2.2-4 5-4s5 1.5 5 4" />
+  </IconSquare>
+);
+
+/**
+ * Account entry (V11). Signed-in → a row into /account showing name/email.
+ * Anonymous → a "sign in to save your personas across devices" affordance into
+ * /signin. Anonymous usage is never forced — this is purely opt-in. Reflects
+ * sign-in/out live via the api client's auth-change event.
+ */
+function AccountCard() {
+  const t = useT();
+  const [signedIn, setSignedIn] = useState<boolean>(false);
+  const [account, setAccount] = useState<Account | null>(null);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    const sync = () => {
+      const on = isSignedIn();
+      setSignedIn(on);
+      setReady(true);
+      if (on) {
+        getAccount()
+          .then(setAccount)
+          .catch(() => setAccount(null));
+      } else {
+        setAccount(null);
+      }
+    };
+    sync();
+    return onAuthChange(sync);
+  }, []);
+
+  // Keep the first render hydration-stable (anon assumption) until the effect runs.
+  if (!ready) {
+    return (
+      <GlassCard style={{ padding: '12px 16px' }}>
+        <Link href="/signin" style={row}>
+          <PersonIcon />
+          <span style={{ flex: 1 }}>{t('account.signInCta')}</span>
+          <span aria-hidden style={{ color: 'var(--text-dim)' }}>›</span>
+        </Link>
+      </GlassCard>
+    );
+  }
+
+  if (!signedIn) {
+    return (
+      <GlassCard style={{ padding: '12px 16px' }}>
+        <Link href="/signin" style={row}>
+          <PersonIcon />
+          <span style={{ flex: 1 }}>{t('account.signInCta')}</span>
+          <span aria-hidden style={{ color: 'var(--text-dim)' }}>›</span>
+        </Link>
+        <p style={{ fontSize: 13, color: 'var(--text-dim)', marginTop: 6 }}>
+          {t('account.signInSub')}
+        </p>
+      </GlassCard>
+    );
+  }
+
+  return (
+    <GlassCard style={{ padding: '12px 16px' }}>
+      <Link href="/account" style={row}>
+        <PersonIcon />
+        <span style={{ flex: 1 }}>
+          {account?.displayName || account?.email || t('account.title')}
+        </span>
+        <span aria-hidden style={{ color: 'var(--text-dim)' }}>›</span>
+      </Link>
+    </GlassCard>
+  );
+}
 
 /**
  * Notifications row — enable Web Push so proactive ("she texts first") messages
@@ -252,6 +329,9 @@ export default function SettingsPage() {
       <AmbientBg colors={ambient} />
       <GlassBar title={t('settings.title')} back="/home" />
       <div style={{ padding: '6px 16px 110px' }}>
+        <h2 style={sectionTitle}>{t('account.section')}</h2>
+        <AccountCard />
+
         <h2 style={sectionTitle}>{t('settings.subscription')}</h2>
         <GlassCard style={{ padding: '12px 16px' }}>
           <Link href="/paywall" style={row}>

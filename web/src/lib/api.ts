@@ -2,14 +2,24 @@
  * API client for the Echo backend (persona-app/api, NestJS on :3048).
  * The frontend is a pure API client — no server-side logic lives in web/.
  *
- * Auth: anonymous device token, bootstrapped via POST /auth/device and kept
- * in localStorage under 'echo.device'. Sent as the `x-device-token` header
- * (or `?t=` query for <img> photo URLs, which cannot set headers).
+ * Auth (V11): two coexisting modes, both sent through the single `apiFetch`
+ * injection point.
+ *  - Anonymous: device token bootstrapped via POST /auth/device, kept in
+ *    localStorage 'echo.device', sent as `x-device-token` (or `?t=` for
+ *    <img>/<audio> URLs, which cannot set headers).
+ *  - Signed-in: a real account session — a JWT in 'echo.jwt' (+ a rotating
+ *    'echo.refresh' refresh token), sent as `Authorization: Bearer <jwt>`.
+ *    On a 401 the JWT is silently refreshed once and the request retried;
+ *    if refresh fails the session is cleared and we fall back to the device
+ *    token (anon keeps working). On first email/social sign-in the current
+ *    device token is passed so the anon user's personas are CLAIMED in place.
  */
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3048';
 
 const DEVICE_KEY = 'echo.device';
+const JWT_KEY = 'echo.jwt';
+const REFRESH_KEY = 'echo.refresh';
 
 // ---------- Types (contract shapes) ----------
 
@@ -161,6 +171,36 @@ export interface Inbox {
   totalUnread: number;
 }
 
+// ---------- Auth / account (V11) ----------
+
+export type AuthProvider = 'apple' | 'google';
+
+/** A session pair from email/social verify or refresh. */
+export interface Session {
+  token: string;
+  refreshToken: string;
+}
+
+/** One linked sign-in identity, as listed on the account profile. */
+export interface AccountProvider {
+  provider: AuthProvider;
+  email?: string | null;
+  emailIsPrivateRelay?: boolean;
+}
+
+/** The signed-in user's profile (GET /account). */
+export interface Account {
+  id: string;
+  email: string | null;
+  emailIsPrivateRelay: boolean;
+  displayName: string | null;
+  plan: string;
+  ageConfirmedAt: string | null;
+  createdAt: string;
+  providers: AccountProvider[];
+  hasDeviceToken: boolean;
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -208,14 +248,131 @@ export async function getDeviceToken(): Promise<string> {
   return tokenPromise;
 }
 
+// ---------- Account session (JWT) ----------
+
+/** True when a real account session (JWT) is present. */
+export function isSignedIn(): boolean {
+  return Boolean(storedJwt());
+}
+
+function storedJwt(): string | null {
+  try {
+    return localStorage.getItem(JWT_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function storedRefresh(): string | null {
+  try {
+    return localStorage.getItem(REFRESH_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/** Persist a session pair (after email/social verify or a refresh rotation). */
+function setSession(s: Session): void {
+  try {
+    localStorage.setItem(JWT_KEY, s.token);
+    localStorage.setItem(REFRESH_KEY, s.refreshToken);
+  } catch {
+    /* localStorage unavailable — session lives only for this load */
+  }
+  notifyAuthChange();
+}
+
+/** Drop the account session (sign out / refresh failure) — device token stays. */
+function clearSession(): void {
+  try {
+    localStorage.removeItem(JWT_KEY);
+    localStorage.removeItem(REFRESH_KEY);
+  } catch {
+    /* ignore */
+  }
+  notifyAuthChange();
+}
+
+const AUTH_EVENT = 'echo:auth';
+
+/** Fired on sign-in/out so screens (e.g. Settings) can re-render reactively. */
+function notifyAuthChange(): void {
+  try {
+    window.dispatchEvent(new Event(AUTH_EVENT));
+  } catch {
+    /* SSR / no window */
+  }
+}
+
+/**
+ * Subscribe to account sign-in/sign-out changes. Returns an unsubscribe fn.
+ * (UI helper — lets the Settings/account entry reflect state without a reload.)
+ */
+export function onAuthChange(cb: () => void): () => void {
+  window.addEventListener(AUTH_EVENT, cb);
+  return () => window.removeEventListener(AUTH_EVENT, cb);
+}
+
 // ---------- Core fetch helpers ----------
 
-async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+/** Build the auth header: Bearer JWT when signed in, else the device token. */
+async function authHeaders(): Promise<Record<string, string>> {
+  const jwt = storedJwt();
+  if (jwt) return { Authorization: `Bearer ${jwt}` };
   const token = await getDeviceToken();
-  return fetch(`${API_BASE}${path}`, {
+  return { 'x-device-token': token };
+}
+
+let refreshPromise: Promise<Session | null> | null = null;
+
+/**
+ * Rotate the session using the stored refresh token (deduped across concurrent
+ * 401s). On success persists + returns the new pair; on failure clears the
+ * session and returns null so callers fall back to the device token.
+ */
+async function refreshSession(): Promise<Session | null> {
+  const rt = storedRefresh();
+  if (!rt) return null;
+  if (!refreshPromise) {
+    refreshPromise = (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/auth/refresh`, json({ refreshToken: rt }));
+        if (!res.ok) {
+          clearSession();
+          return null;
+        }
+        const pair = (await res.json()) as Session;
+        setSession(pair);
+        return pair;
+      } catch {
+        return null; // network blip — keep the session, let the caller fall back
+      } finally {
+        refreshPromise = null;
+      }
+    })();
+  }
+  return refreshPromise;
+}
+
+async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const baseHeaders = (init.headers as Record<string, string> | undefined) ?? {};
+  const res = await fetch(`${API_BASE}${path}`, {
     ...init,
-    headers: { ...(init.headers as Record<string, string> | undefined), 'x-device-token': token },
+    headers: { ...baseHeaders, ...(await authHeaders()) },
   });
+  // Signed-in only: a 401 means the JWT expired — refresh once and retry. If
+  // refresh fails the session is cleared; we don't retry-as-anon here (the
+  // caller surfaces the 401), but subsequent requests use the device token.
+  if (res.status === 401 && storedJwt()) {
+    const pair = await refreshSession();
+    if (pair) {
+      return fetch(`${API_BASE}${path}`, {
+        ...init,
+        headers: { ...baseHeaders, Authorization: `Bearer ${pair.token}` },
+      });
+    }
+  }
+  return res;
 }
 
 async function apiJson<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -747,3 +904,102 @@ export const removePushSubscription = (endpoint: string): Promise<{ ok: boolean 
 
 /** Send a test push to the caller's own subscriptions (verification helper). */
 export const testPush = (): Promise<{ sent: number }> => apiJson('/push/test', { method: 'POST' });
+
+// ---------- Auth / account endpoints (V11) ----------
+
+/**
+ * Begin an email sign-in: the backend mints a one-time code and sends it.
+ * In dev (no mail provider) the code is returned as `devCode` so the flow is
+ * testable now. The current device token is passed so the anon user can be
+ * claimed on verify.
+ */
+export async function emailStart(email: string): Promise<{ ok: boolean; devCode?: string }> {
+  const deviceToken = isSignedIn() ? undefined : await getDeviceToken();
+  return apiJson('/auth/email/start', json({ email, deviceToken }));
+}
+
+/**
+ * Finish an email sign-in with the code. Returns + stores the session pair.
+ * Passing the device token lets the backend claim/merge the anon user's
+ * personas onto the (new or existing) account in one transaction.
+ */
+export async function emailVerify(email: string, code: string): Promise<Session> {
+  const deviceToken = isSignedIn() ? undefined : await getDeviceToken();
+  const session = await apiJson<Session>('/auth/email/verify', json({ email, code, deviceToken }));
+  setSession(session);
+  return session;
+}
+
+/**
+ * Sign in with Apple/Google using a provider id_token (from SIWA-JS / GIS on
+ * web, or the native plugin on Capacitor). Returns + stores the session pair,
+ * claiming the device token's personas. Throws ApiError(501,
+ * 'provider_not_configured') when the backend has no creds for that provider —
+ * the sign-in UI shows a "coming soon" state instead of crashing.
+ */
+export async function socialLogin(
+  provider: AuthProvider,
+  idToken: string,
+  nonce?: string,
+): Promise<Session> {
+  const deviceToken = isSignedIn() ? undefined : await getDeviceToken();
+  const session = await apiJson<Session>(
+    '/auth/social',
+    json({ provider, idToken, nonce, deviceToken }),
+  );
+  setSession(session);
+  return session;
+}
+
+/** Manually rotate the session (normally automatic on 401). */
+export async function refresh(): Promise<Session | null> {
+  return refreshSession();
+}
+
+/** Sign out this session (revoke the current refresh token) and clear locally. */
+export async function logout(): Promise<void> {
+  const refreshToken = storedRefresh();
+  if (refreshToken) {
+    try {
+      await apiJson('/auth/logout', json({ refreshToken }));
+    } catch {
+      /* best-effort — clear locally regardless */
+    }
+  }
+  clearSession();
+}
+
+/** Sign out everywhere (revoke all refresh tokens) and clear locally. */
+export async function logoutAll(): Promise<void> {
+  const refreshToken = storedRefresh();
+  if (refreshToken) {
+    try {
+      await apiJson('/auth/logout-all', json({ refreshToken }));
+    } catch {
+      /* best-effort */
+    }
+  }
+  clearSession();
+}
+
+/** The signed-in user's profile. */
+export const getAccount = (): Promise<Account> => apiJson('/account');
+
+/** Patch the profile (display name and/or 18+ confirmation). */
+export const updateAccount = (patch: {
+  displayName?: string;
+  ageConfirmed?: boolean;
+}): Promise<Account> => apiJson('/account', { ...json(patch), method: 'PATCH' });
+
+/** GDPR data export (whatever the backend bundles for this account). */
+export const exportAccount = (): Promise<unknown> => apiJson('/account/export');
+
+/**
+ * Permanently delete the account: cascades personas/identities/sessions and
+ * purges media server-side. Clears the local session afterward.
+ */
+export async function deleteAccount(): Promise<{ ok: boolean }> {
+  const res = await apiJson<{ ok: boolean }>('/account', { method: 'DELETE' });
+  clearSession();
+  return res;
+}
