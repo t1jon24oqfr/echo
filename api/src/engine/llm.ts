@@ -42,7 +42,18 @@ export async function complete(opts: {
 }
 
 export async function streamChat(
-  opts: { model: string; messages: ChatMessage[]; temperature?: number; maxTokens?: number },
+  opts: {
+    model: string;
+    messages: ChatMessage[];
+    temperature?: number;
+    maxTokens?: number;
+    // R5 decoding knobs (Qwen3 via OpenRouter supports these). presence_penalty
+    // discourages the model from settling into generic filler; logit_bias lets a
+    // caller ban specific token ids (model-specific) when a tokenizer is known.
+    frequencyPenalty?: number;
+    presencePenalty?: number;
+    logitBias?: Record<string, number>;
+  },
   onToken: (t: string) => void,
 ): Promise<string> {
   const res = await fetch(`${BASE_URL}/chat/completions`, {
@@ -53,7 +64,9 @@ export async function streamChat(
       messages: opts.messages,
       temperature: opts.temperature ?? 0.8,
       max_tokens: opts.maxTokens ?? 350,
-      frequency_penalty: 0.4,
+      frequency_penalty: opts.frequencyPenalty ?? 0.4,
+      presence_penalty: opts.presencePenalty ?? 0.3,
+      ...(opts.logitBias ? { logit_bias: opts.logitBias } : {}),
       stream: true,
       provider: { data_collection: 'deny' },
     }),

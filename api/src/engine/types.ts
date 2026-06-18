@@ -64,6 +64,10 @@ export interface MemoryItem {
   date: string; // YYYY-MM (approx)
   importance?: number; // 1..10 poignancy (heuristic); used by retrieval ranking
   lastAccessedAt?: string; // ISO; used by recency term (defaults to createdAt/builtAt)
+  // 'episodic' | 'reflection' | 'fact' — routes retrieval (fact pinned, reflection boosted).
+  kind?: string;
+  // 'user' | 'card' | 'reflection' | 'model' — provenance; 'model' never pins.
+  source?: string;
   // Phase 3 — Generative-Agents retrieval. Optional: when present, retrieval
   // blends cosine relevance; when absent it falls back to the keyword matcher.
   id?: string; // Memory row id (so retrieval can bump lastAccessedAt)
@@ -82,4 +86,7 @@ export interface PersonaFile {
   // Phase 1 Character Passport (parsed). Optional so older/unbuilt personas and
   // existing call sites keep working; the prompt assembler tolerates its absence.
   passport?: CharacterPassport;
+  // Realism: the persona knows nothing after this date ('YYYY-MM-DD'|'YYYY-MM').
+  // Grounds the prompt + gates retrieval. Absent ⇒ no cutoff applied.
+  knowledgeCutoff?: string;
 }

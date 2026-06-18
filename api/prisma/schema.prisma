@@ -107,6 +107,11 @@ model Persona {
   passport      String? // JSON CharacterPassport (Phase 1 — see src/engine/passport.ts)
   passportVersion Int         @default(1)
   timezone      String        @default("Europe/Kyiv")
+  // Realism: the persona knows nothing after this date ('YYYY-MM-DD' or 'YYYY-MM').
+  // For a memorial persona this is the death / last-active date — both an
+  // authenticity fix (IMPersona's #1 unmasking vector is post-cutoff events) and
+  // the ethically correct memorial behavior. Retrieval is gated to it too.
+  knowledgeCutoff String?
   createdAt     DateTime      @default(now())
   memories      Memory[]
   photos        Photo[]
@@ -127,6 +132,10 @@ model Memory {
   importance Int    @default(5) // 1..10 poignancy (heuristic at write time)
   // Phase 2 — additive, defaulted so no backfill needed (design spec §2):
   kind           String   @default("episodic") // 'episodic'|'reflection'|'fact'
+  // Provenance: 'user' (from the human's turn = ground truth) | 'card' (verified
+  // build-time fact) | 'reflection' (consolidated belief) | 'model' (derived from
+  // the persona's OWN reply = low-confidence; must never pin/supersede a fact).
+  source         String   @default("user")
   emotionTag     String? // octant word at write time (nightly reflection / appraisal)
   lastAccessedAt DateTime @default(now()) // recency term for retrieval
   // Phase 3 — Generative-Agents retrieval: a JSON float[] vector embedded once

@@ -83,18 +83,22 @@ export class MemoryService {
     personaAuthor: string,
     userAuthor: string,
     userText: string,
-    replyText: string,
+    // The persona's OWN reply is intentionally NOT mined for memories (R3): a
+    // detail the model invents in a reply would otherwise become a "remembered
+    // fact" that hardens future replies — a self-reinforcing confabulation loop,
+    // the worst failure mode for a memorial. Only the human's turn is ground
+    // truth. Kept in the signature for the caller; deliberately unused.
+    _replyText: string,
   ): Promise<void> {
     try {
       if (!hasApiKey()) return;
       const u = (userText ?? '').trim();
-      const r = (replyText ?? '').trim();
-      if (!u && !r) return;
+      if (!u) return;
 
       const now = new Date();
       const date = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
 
-      const extracted = await this.extract(personaAuthor, userAuthor, u, r);
+      const extracted = await this.extract(personaAuthor, userAuthor, u);
       if (!extracted.length) return;
 
       // Dedupe against the persona's recent memories by normalized-text prefix.
@@ -126,6 +130,7 @@ export class MemoryService {
           keywords: JSON.stringify(m.keywords ?? []),
           date: m.date || null,
           importance: memoryImportance(m.text, m.date),
+          source: 'user', // derived from the human's turn = ground truth (R3)
         })),
       });
       this.logger.log(`live memory: +${fresh.length} for persona ${personaId}`);
@@ -197,12 +202,16 @@ export class MemoryService {
       .catch(() => undefined);
   }
 
-  /** Same shape as engine/extractMemories: [{text, keywords, date}]. 0-3 items. */
+  /**
+   * Extract durable memories from ONLY the human's turn (ground truth). The
+   * persona's reply is deliberately not passed in (see learnFromTurn / R3) so the
+   * model can never "remember" something it just invented. Same shape as
+   * engine/extractMemories: [{text, keywords, date}], 0-3 items.
+   */
   private async extract(
     personaAuthor: string,
     userAuthor: string,
     userText: string,
-    replyText: string,
   ): Promise<MemoryItem[]> {
     const items = await completeJson<MemoryItem[]>({
       model: EXTRACT_MODEL,
@@ -211,15 +220,14 @@ export class MemoryService {
         {
           role: 'system',
           content:
-            'You extract durable memories/facts from a single chat exchange for a memory system. Only include things worth remembering long-term: events, plans, people, places, feelings, conflicts, promises, inside jokes that were newly revealed. Skip greetings and small talk — if nothing is worth keeping, return []. Write each memory in the dominant language of the exchange. Return ONLY a valid JSON array.',
+            'You extract durable memories for a persona\'s memory system from ONE message the user sent. Capture only things the USER actually revealed and that are worth remembering long-term: events, plans, people, places, the user\'s feelings, conflicts, promises, newly revealed shared facts. Do NOT invent or infer anything not stated. Skip greetings and small talk — if nothing is worth keeping, return []. Write each memory in the dominant language of the message. Return ONLY a valid JSON array.',
         },
         {
           role: 'user',
-          content: `This is the latest exchange between "${personaAuthor}" and "${userAuthor}". Extract 0-3 NEW durable memories as JSON (return [] for pure small talk):
-[{"text": "one self-contained sentence, from ${personaAuthor}'s point of view", "keywords": ["3-6 lowercase keywords"], "date": "YYYY-MM"}]
+          content: `"${userAuthor}" just sent this message to "${personaAuthor}". Extract 0-3 NEW durable memories about ${userAuthor} or their shared world, written from ${personaAuthor}'s point of view (return [] for pure small talk):
+[{"text": "one self-contained sentence", "keywords": ["3-6 lowercase keywords"], "date": "YYYY-MM"}]
 
-${userAuthor}: ${userText || '(no text)'}
-${personaAuthor}: ${replyText || '(no text)'}`,
+${userAuthor}: ${userText || '(no text)'}`,
         },
       ],
     });

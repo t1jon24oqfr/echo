@@ -253,6 +253,7 @@ export class PersonasService {
         mode,
         description: dto.description ?? null,
         ambient: dto.ambient ? JSON.stringify(dto.ambient) : null,
+        knowledgeCutoff: dto.knowledgeCutoff ?? null,
         status: 'draft',
       },
     });
@@ -309,6 +310,7 @@ export class PersonasService {
         ...(dto.name !== undefined ? { name: dto.name } : {}),
         ...(dto.description !== undefined ? { description: dto.description } : {}),
         ...(dto.ambient !== undefined ? { ambient: JSON.stringify(dto.ambient) } : {}),
+        ...(dto.knowledgeCutoff !== undefined ? { knowledgeCutoff: dto.knowledgeCutoff } : {}),
       },
     });
     return personaView(persona);

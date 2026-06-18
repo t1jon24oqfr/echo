@@ -1,4 +1,7 @@
-import { IsArray, IsBoolean, IsIn, IsObject, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsArray, IsBoolean, IsIn, IsObject, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+
+// 'YYYY' | 'YYYY-MM' | 'YYYY-MM-DD' — the knowledge-cutoff / death date.
+const CUTOFF_RE = /^\d{4}(-\d{2}(-\d{2})?)?$/;
 
 export class CreatePersonaDto {
   @IsString()
@@ -23,6 +26,12 @@ export class CreatePersonaDto {
   @IsArray()
   @IsString({ each: true })
   ambient?: string[];
+
+  // Realism: the persona knows nothing after this date (death / last-active date).
+  @IsOptional()
+  @IsString()
+  @Matches(CUTOFF_RE, { message: 'knowledgeCutoff must be YYYY, YYYY-MM or YYYY-MM-DD' })
+  knowledgeCutoff?: string;
 }
 
 export class UpdatePersonaDto {
@@ -41,6 +50,11 @@ export class UpdatePersonaDto {
   @IsArray()
   @IsString({ each: true })
   ambient?: string[];
+
+  @IsOptional()
+  @IsString()
+  @Matches(CUTOFF_RE, { message: 'knowledgeCutoff must be YYYY, YYYY-MM or YYYY-MM-DD' })
+  knowledgeCutoff?: string;
 }
 
 export class IngestDto {

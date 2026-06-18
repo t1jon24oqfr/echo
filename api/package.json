@@ -8,6 +8,7 @@
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",
     "prisma:migrate": "prisma migrate dev",
+    "eval:persona": "node dist/eval/eval-persona.js",
     "test": "node --test \"test/*.test.ts\""
   },
   "dependencies": {

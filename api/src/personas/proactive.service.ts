@@ -244,6 +244,7 @@ export class ProactiveService {
       memories,
       stats,
       ...(passport ? { passport } : {}),
+      ...(persona.knowledgeCutoff ? { knowledgeCutoff: persona.knowledgeCutoff } : {}),
     };
   }
 }

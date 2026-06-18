@@ -620,6 +620,8 @@ export class ChatService {
         keywords: parseJson<string[]>(m.keywords) ?? [],
         date: m.date ?? '',
         importance: m.importance,
+        kind: m.kind,
+        source: m.source,
         lastAccessedAt: m.lastAccessedAt?.toISOString(),
         ...(emb ? { embedding: emb } : {}),
       };
@@ -635,6 +637,7 @@ export class ChatService {
       memories,
       stats,
       ...(passport ? { passport } : {}),
+      ...(persona.knowledgeCutoff ? { knowledgeCutoff: persona.knowledgeCutoff } : {}),
     };
   }
 }

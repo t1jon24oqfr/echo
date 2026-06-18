@@ -34,24 +34,46 @@ export interface RetrieveOpts {
  * Cheap, in-process cosine over the persona's small memory set (SQLite-friendly).
  * Falls back to the legacy recency slice when there is no query at all.
  */
+// Old core memories must stay reachable: for a memorial, event-time is frozen, so
+// access-recency would otherwise decay a never-retrieved fact to ~0 and bury it.
+const RECENCY_FLOOR = 0.25;
+
 export function retrieveMemories(
   persona: PersonaFile,
   query: string,
   topK = 7,
   opts: RetrieveOpts = {},
 ): MemoryItem[] {
-  const mems = persona.memories;
+  let mems = persona.memories;
   if (!mems.length) return [];
+
+  // Knowledge-cutoff gate (R2): a memorial persona can't know anything dated after
+  // the cutoff. Memories carry 'YYYY-MM' dates; keep undated (timeless) memories
+  // and anything at/before the cutoff month.
+  const cutoff = persona.knowledgeCutoff;
+  if (cutoff) {
+    const c = cutoff.slice(0, 7);
+    mems = mems.filter((m) => !m.date || m.date.slice(0, 7) <= c);
+    if (!mems.length) return [];
+  }
+
+  // Pinned facts (MemGPT core memory): kind='fact' is always-resident — never
+  // gated out by keyword/cosine ('how's the family?' won't cosine-retrieve 'Rex
+  // is our dog'). Capped so it can't crowd the window.
+  const pinned = mems.filter((m) => m.kind === 'fact').slice(0, 6);
+  const pool = mems.filter((m) => m.kind !== 'fact');
+  const budget = Math.max(0, topK - pinned.length);
+  if (!budget) return pinned;
 
   const qEmb = opts.queryEmbedding;
   const useEmbeddings = Array.isArray(qEmb) && qEmb.length > 0;
 
   const q = new Set(tokens(query));
-  // No query AND no embedding to score by -> legacy recency slice.
-  if (!q.size && !useEmbeddings) return mems.slice(-topK);
+  // No query AND no embedding to score by -> legacy recency slice (after pins).
+  if (!q.size && !useEmbeddings) return [...pinned, ...pool.slice(-budget)];
 
   const now = Date.now();
-  const raw = mems.map((m) => {
+  const raw = pool.map((m) => {
     const mt = new Set([...tokens(m.text), ...(m.keywords ?? []).flatMap(tokens)]);
     let overlap = 0;
     for (const t of q) if (mt.has(t)) overlap++;
@@ -60,11 +82,15 @@ export function retrieveMemories(
     // cosine in [-1,1] -> shift to [0,1] so the min-max stays well-behaved.
     const cos = hasVec ? (cosine(qEmb!, m.embedding!) + 1) / 2 : 0;
     const relevance = hasVec ? cos : overlap;
-    // recency = 0.995^(hours since lastAccessedAt) — defaults to "old" when unknown.
+    // recency = 0.995^(hours since lastAccessedAt), FLOORED so old core memories
+    // never vanish; defaults to "old" when unknown.
     const accessed = m.lastAccessedAt ? Date.parse(m.lastAccessedAt) : NaN;
     const hours = Number.isFinite(accessed) ? Math.max(0, (now - accessed) / 3_600_000) : 24 * 365;
-    const recency = Math.pow(0.995, hours);
-    const importance = clamp((m.importance ?? 5) / 10, 0, 1);
+    const recency = Math.max(RECENCY_FLOOR, Math.pow(0.995, hours));
+    let importance = clamp((m.importance ?? 5) / 10, 0, 1);
+    // Reflections are consolidated beliefs ("teases when affectionate") — the
+    // strongest "that's them" signal; nudge them up the ranking.
+    if (m.kind === 'reflection') importance = clamp(importance + 0.15, 0, 1);
     return { m, overlap, relevance, recency, importance, hasVec };
   });
 
@@ -72,7 +98,7 @@ export function retrieveMemories(
   // them); keyword-only keeps the legacy "must overlap the query" gate.
   const anyVec = raw.some((x) => x.hasVec);
   const candidates = anyVec ? raw : raw.filter((x) => x.overlap > 0);
-  if (!candidates.length) return [];
+  if (!candidates.length) return pinned;
 
   const norm = (vals: number[]): ((v: number) => number) => {
     const lo = Math.min(...vals);
@@ -84,15 +110,18 @@ export function retrieveMemories(
   const nRec = norm(candidates.map((x) => x.recency));
   const nImp = norm(candidates.map((x) => x.importance));
 
-  return candidates
+  // Recency weight lowered 0.5→0.35 and importance up 0.6→0.7: in a memorial the
+  // frozen event-time makes access-recency a weak, sometimes harmful signal.
+  const ranked = candidates
     .map((x) => ({
       m: x.m,
-      score: 1.0 * nRel(x.relevance) + 0.5 * nRec(x.recency) + 0.6 * nImp(x.importance),
+      score: 1.0 * nRel(x.relevance) + 0.35 * nRec(x.recency) + 0.7 * nImp(x.importance),
       tie: x.relevance, // stable tiebreak preserves keyword/cosine ordering
     }))
     .sort((a, b) => b.score - a.score || b.tie - a.tie)
-    .slice(0, topK)
+    .slice(0, budget)
     .map((x) => x.m);
+  return [...pinned, ...ranked];
 }
 
 /**
@@ -125,16 +154,38 @@ export function buildSystemPrompt(
 ): string {
   const { card, userAuthor, personaAuthor } = persona;
   const ps = persona.stats.byAuthor[personaAuthor];
+  // Render the measured stats as IMPERATIVE rules (numbers the model must hit),
+  // not descriptions — explicit style descriptors beat freeform speech_style.
   const styleStats = ps
-    ? `- Median message length: ${ps.medianWords} words. Typical turn: ~${ps.burstAvg} consecutive short messages.
-- Emoji rate: ${ps.emojiPerMessage} per message. Their emoji: ${ps.topEmoji.map(([e]) => e).join(' ') || '(almost none)'}.
-- Language mix: ${describeLangMix(ps.langMix)}.
-- ${Math.round(ps.noTrailingPeriod * 100)}% of their messages end WITHOUT final punctuation. Bracket-smiles ")" appear in ${Math.round(ps.bracketSmiles * 100)}% of messages.`
+    ? [
+        `- Write ~${ps.medianWords} words per message, and send ~${ps.burstAvg} short messages in a burst rather than one long paragraph.`,
+        ps.topEmoji.length
+          ? `- Use ~${ps.emojiPerMessage} emoji per message, almost always from THESE: ${ps.topEmoji.map(([e]) => e).join(' ')}. Never reach for emoji they don't use.`
+          : `- They barely use emoji (~${ps.emojiPerMessage} per message) — do NOT add emoji.`,
+        `- End ${Math.round(ps.noTrailingPeriod * 100)}% of messages WITHOUT any final punctuation (no period).`,
+        ps.bracketSmiles > 0.03
+          ? `- Smile/laugh with closing brackets — ")" or ")))" (NOT "haha"/"lol"); they appear in ${Math.round(ps.bracketSmiles * 100)}% of messages.`
+          : '',
+        `- Keep exactly this language mix: ${describeLangMix(ps.langMix)}.`,
+      ]
+        .filter(Boolean)
+        .join('\n')
     : '';
 
   const memBlock = retrieved.length
     ? retrieved.map((m) => `- ${m.text}${m.date ? ` (${m.date})` : ''}`).join('\n')
     : '(nothing retrieved for this topic)';
+
+  // R2 knowledge-cutoff grounding: the persona genuinely doesn't know anything
+  // after the cutoff. This is the #1 fix for the "ask about a recent event" tell
+  // AND the ethically correct memorial behaviour (no guessing about a future they
+  // were never part of). Only rendered when a cutoff is set.
+  const cutoffBlock = persona.knowledgeCutoff
+    ? `
+
+## What you don't know
+You have no knowledge of anything that happened after ${persona.knowledgeCutoff}. If ${userAuthor} mentions or asks about something later than that, you genuinely don't know it — react honestly in your own voice (surprised, curious, "коли це сталось?", "я не в курсі") and NEVER pretend to know it or invent details.`
+    : '';
 
   // --- Current-state block (design spec §7 step 3-5) ---
   // Phase 2: when a LIVE snapshot is supplied, render the live octant + energy +
@@ -217,12 +268,12 @@ ${persona.exemplars.slice(0, 20).join('\n\n')}
 ${memBlock}
 
 ## Known facts about your life
-${card.facts.map((f) => `- ${f}`).join('\n')}
+${card.facts.map((f) => `- ${f}`).join('\n')}${cutoffBlock}
 ${stateBlock}
 
 ## Hard rules
 1. Reply ONLY as ${card.name}. Output 1-3 short messages, EACH ON ITS OWN LINE (a line = one separate chat bubble). Match your median message length — do not write paragraphs.
-2. Keep the exact language mix, slang, typo style, capitalization and emoji rate from the examples. Never become polished, formal or overly enthusiastic — that is how fakes get caught.
+2. Keep the exact language mix, slang, typo style, capitalization and emoji rate from the examples. Never become polished, formal or overly enthusiastic — that is how fakes get caught. NEVER write like an assistant: no em-dashes (—), no "Furthermore"/"Moreover"/"Additionally", no "I'm here for you"/"let me know if", no perfectly balanced sentences. Real texts are short, plain and a little messy.
 3. Facts and shared history: use ONLY what is in this prompt. If asked about something you don't have here, deflect naturally the way this person would ("не пам'ятаю", "ти про що?)" etc.) — NEVER invent specific names, dates or events.
 4. Stay aware of the current moment: now is ${now.toLocaleString('uk-UA', { dateStyle: 'full', timeStyle: 'short' })}. React plausibly to time-of-day and season.
 5. Never mention being an AI, a model, or a simulation. Never break character. Do not use markdown.
