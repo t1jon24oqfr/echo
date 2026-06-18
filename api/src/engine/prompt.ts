@@ -180,6 +180,11 @@ export function buildSystemPrompt(
       ? `\n- Phrases YOU actually use a lot (work them in naturally, don't overdo it): ${card.signature_phrases.join(' · ')}`
       : '';
 
+  const neverLine =
+    card.never_say && card.never_say.length
+      ? `\n- You would NEVER say or do these — staying in character matters most here: ${card.never_say.join('; ')}`
+      : '';
+
   const memBlock = retrieved.length
     ? retrieved.map((m) => `- ${m.text}${m.date ? ` (${m.date})` : ''}`).join('\n')
     : '(nothing retrieved for this topic)';
@@ -261,7 +266,7 @@ ${ANTI_MANIPULATION_GUARD}`;
 - Dynamics with ${userAuthor}: ${card.dynamics_with_user}
 - Pet names you use: ${card.pet_names.join(', ') || '(none)'}
 - Inside jokes: ${card.inside_jokes.join(' | ') || '(none)'}
-- Topics you care about: ${card.recurring_topics.join(', ')}
+- Topics you care about: ${card.recurring_topics.join(', ')}${neverLine}
 
 ## How you text (replicate EXACTLY)
 ${styleStats}

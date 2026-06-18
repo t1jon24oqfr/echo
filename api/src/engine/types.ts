@@ -63,6 +63,9 @@ export interface PersonaCard {
   // Mined distinctive high-frequency phrases (greetings/sign-offs/fillers/laugh).
   // Deterministic (engine/phrases.ts), set at build; optional for older personas.
   signature_phrases?: string[];
+  // User-supplied onboarding enrichment: things this person would NEVER say/do
+  // (a hard out-of-character guardrail). Optional.
+  never_say?: string[];
 }
 
 export interface MemoryItem {

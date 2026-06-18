@@ -11,6 +11,7 @@
     "eval:persona": "node dist/eval/eval-persona.js",
     "replay:persona": "node dist/eval/replay-persona.js",
     "lora:dataprep": "node dist/eval/lora-dataprep.js",
+    "eval:judge": "node dist/eval/eval-judge.js",
     "test": "node --test \"test/*.test.ts\""
   },
   "dependencies": {

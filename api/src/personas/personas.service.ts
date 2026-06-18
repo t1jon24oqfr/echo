@@ -13,7 +13,8 @@ import { parseLineString } from '../engine/parsers/line';
 import { parseVkString } from '../engine/parsers/vk';
 import { segment } from '../engine/segment';
 import { computeStats } from '../engine/stats';
-import type { CreatePersonaDto, IngestDto, UpdatePersonaDto } from './dto';
+import type { CreatePersonaDto, EnrichPersonaDto, IngestDto, UpdatePersonaDto } from './dto';
+import type { PersonaCard } from '../engine/types';
 import { PersonaStateService } from './persona-state.service';
 import type { Presence as StatePresence } from './presence';
 
@@ -314,6 +315,63 @@ export class PersonasService {
       },
     });
     return personaView(persona);
+  }
+
+  /**
+   * Onboarding enrichment (N10): merge user-described details into the persona —
+   * extra pet-names / signature phrases / "they would never" guardrails / traits
+   * into the card, episodic anchors as pinned high-importance memories, and the
+   * knowledge-cutoff date. Everything the deterministic build can't infer from the
+   * chat alone but a person who knew them can supply.
+   */
+  async enrich(userId: string, personaId: string, dto: EnrichPersonaDto): Promise<Record<string, unknown>> {
+    await this.getOwned(userId, personaId);
+    const persona = await this.prisma.persona.findUnique({ where: { id: personaId } });
+
+    const merge = (existing: string[] | undefined, incoming: string[] | undefined, cap: number): string[] => {
+      const set = new Set<string>(existing ?? []);
+      for (const s of incoming ?? []) {
+        const t = s.trim();
+        if (t) set.add(t);
+      }
+      return [...set].slice(0, cap);
+    };
+
+    const card = persona?.card ? parseJson<PersonaCard>(persona.card) : null;
+    if (card) {
+      if (dto.petNames) card.pet_names = merge(card.pet_names, dto.petNames, 30);
+      if (dto.signaturePhrases) card.signature_phrases = merge(card.signature_phrases, dto.signaturePhrases, 24);
+      if (dto.neverSay) card.never_say = merge(card.never_say, dto.neverSay, 20);
+      if (dto.traits) card.traits = merge(card.traits, dto.traits, 20);
+    }
+
+    // Episodic anchors → pinned (kind='fact'), top-importance, source='user' so
+    // they're always-resident in the prompt and never gated out by retrieval.
+    const anchors = (dto.anchors ?? []).map((a) => a.trim()).filter(Boolean).slice(0, 20);
+    if (anchors.length) {
+      const now = new Date();
+      const date = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+      await this.prisma.memory.createMany({
+        data: anchors.map((text) => ({
+          personaId,
+          text,
+          keywords: JSON.stringify([]),
+          date,
+          importance: 10,
+          kind: 'fact',
+          source: 'user',
+        })),
+      });
+    }
+
+    const persisted = await this.prisma.persona.update({
+      where: { id: personaId },
+      data: {
+        ...(card ? { card: JSON.stringify(card) } : {}),
+        ...(dto.knowledgeCutoff !== undefined ? { knowledgeCutoff: dto.knowledgeCutoff } : {}),
+      },
+    });
+    return personaView(persisted);
   }
 
   async remove(userId: string, personaId: string): Promise<{ ok: true }> {

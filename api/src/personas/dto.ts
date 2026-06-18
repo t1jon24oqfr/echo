@@ -57,6 +57,47 @@ export class UpdatePersonaDto {
   knowledgeCutoff?: string;
 }
 
+// PATCH /personas/:id/enrich — user-described onboarding enrichment merged into
+// the persona (post-build). Every field optional; arrays are bounded + trimmed.
+export class EnrichPersonaDto {
+  @IsOptional()
+  @IsString()
+  @Matches(CUTOFF_RE, { message: 'knowledgeCutoff must be YYYY, YYYY-MM or YYYY-MM-DD' })
+  knowledgeCutoff?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(80, { each: true })
+  petNames?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(120, { each: true })
+  signaturePhrases?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(200, { each: true })
+  neverSay?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(200, { each: true })
+  traits?: string[];
+
+  // Episodic anchors: hand-verified high-poignancy memories ("a moment with them
+  // you'd never want to lose"). Written as high-importance pinned memories.
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(600, { each: true })
+  anchors?: string[];
+}
+
 export class IngestDto {
   @IsOptional()
   @IsIn(['telegram', 'whatsapp', 'instagram', 'facebook', 'line', 'vk'])

@@ -30,7 +30,7 @@ import { DeviceTokenGuard, type AuthedRequest } from '../auth/device-token.guard
 import { PrismaService } from '../prisma.service';
 import { BuildService } from './build.service';
 import { ChatService } from './chat.service';
-import { ChatDto, CreatePersonaDto, IngestDto, SelfieDto, SetAvatarDto, UpdatePersonaDto, UpdateProfileDto, VisualConfirmDto } from './dto';
+import { ChatDto, CreatePersonaDto, EnrichPersonaDto, IngestDto, SelfieDto, SetAvatarDto, UpdatePersonaDto, UpdateProfileDto, VisualConfirmDto } from './dto';
 import { PersonasService } from './personas.service';
 import { ProfileService } from './profile.service';
 import type { CharacterPassport } from '../engine/passport';
@@ -133,6 +133,18 @@ export class PersonasController {
     @Body() dto: UpdatePersonaDto,
   ): Promise<Record<string, unknown>> {
     return this.personas.update(req.user.id, id, dto);
+  }
+
+  // Onboarding enrichment: user-described pet-names / signature phrases / "never
+  // say" / traits / episodic anchors / knowledge-cutoff merged into the persona.
+  @Post(':id/enrich')
+  @Throttle({ default: { limit: 40, ttl: 3_600_000 } })
+  enrich(
+    @Req() req: AuthedRequest,
+    @Param('id') id: string,
+    @Body() dto: EnrichPersonaDto,
+  ): Promise<Record<string, unknown>> {
+    return this.personas.enrich(req.user.id, id, dto);
   }
 
   @Delete(':id')
