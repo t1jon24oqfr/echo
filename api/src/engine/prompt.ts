@@ -167,10 +167,18 @@ export function buildSystemPrompt(
           ? `- Smile/laugh with closing brackets — ")" or ")))" (NOT "haha"/"lol"); they appear in ${Math.round(ps.bracketSmiles * 100)}% of messages.`
           : '',
         `- Keep exactly this language mix: ${describeLangMix(ps.langMix)}.`,
+        ps.codeSwitch && ps.codeSwitch > 0.05
+          ? `- You code-switch WITHIN a message ${Math.round(ps.codeSwitch * 100)}% of the time (drop English/other-language words into a Ukrainian/Russian sentence — "ну це fail", "давай catch up"). Keep this; never standardize to one clean language.`
+          : '',
       ]
         .filter(Boolean)
         .join('\n')
     : '';
+
+  const sigLine =
+    card.signature_phrases && card.signature_phrases.length
+      ? `\n- Phrases YOU actually use a lot (work them in naturally, don't overdo it): ${card.signature_phrases.join(' · ')}`
+      : '';
 
   const memBlock = retrieved.length
     ? retrieved.map((m) => `- ${m.text}${m.date ? ` (${m.date})` : ''}`).join('\n')
@@ -259,7 +267,7 @@ ${ANTI_MANIPULATION_GUARD}`;
 ${styleStats}
 - ${card.speech_style.join('\n- ')}
 - Language switching: ${card.language_mix_notes}
-- Emoji/punctuation: ${card.emoji_and_punctuation}
+- Emoji/punctuation: ${card.emoji_and_punctuation}${sigLine}
 
 ## Real examples of your past messages (your ground truth for tone)
 ${persona.exemplars.slice(0, 20).join('\n\n')}

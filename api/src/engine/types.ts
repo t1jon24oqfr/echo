@@ -25,6 +25,10 @@ export interface AuthorStats {
   noTrailingPeriod: number; // share of messages ending without . ! ?
   bracketSmiles: number; // share of messages containing ")" smiles
   burstAvg: number; // avg consecutive messages per turn
+  // Share of messages that mix scripts WITHIN one message (Cyrillic + Latin) —
+  // the surzhyk / borrowed-English code-switching that whole-message detectLang
+  // erases. Optional: older builds omit it; the prompt tolerates its absence.
+  codeSwitch?: number;
 }
 
 export interface CorpusStats {
@@ -56,6 +60,9 @@ export interface PersonaCard {
   recurring_topics: string[];
   dynamics_with_user: string;
   facts: string[];
+  // Mined distinctive high-frequency phrases (greetings/sign-offs/fillers/laugh).
+  // Deterministic (engine/phrases.ts), set at build; optional for older personas.
+  signature_phrases?: string[];
 }
 
 export interface MemoryItem {

@@ -7,6 +7,8 @@ import { embedText, hasEmbedKey, serializeEmbedding } from '../engine/embeddings
 const RECENT_WINDOW = 50; // how many recent memories to dedupe against
 const MAX_NEW_PER_TURN = 3; // cap per completed exchange
 const DEDUPE_PREFIX = 60; // normalized-text prefix length used as dedupe key
+const REFLECT_EVERY = 20; // consolidate into beliefs every N new episodic memories
+const REFLECT_MIN = 15; // don't reflect until there's enough to generalize from
 
 // Feeling-word lexicon (UA/RU/EN, prefix-matched) for the importance heuristic.
 // Kept tiny + multilingual — a poignant memory should score higher.
@@ -136,9 +138,96 @@ export class MemoryService {
       this.logger.log(`live memory: +${fresh.length} for persona ${personaId}`);
       // Embed the just-written rows once (fire-and-forget; never blocks a turn).
       void this.backfillEmbeddings(personaId).catch(() => undefined);
+
+      // Reflection trigger (Generative-Agents): every REFLECT_EVERY new episodic
+      // memories, consolidate into higher-level beliefs. Off the hot path.
+      const total = await this.prisma.memory.count({
+        where: { personaId, kind: { not: 'reflection' } },
+      });
+      const before = total - fresh.length;
+      if (total >= REFLECT_MIN && Math.floor(total / REFLECT_EVERY) > Math.floor(before / REFLECT_EVERY)) {
+        void this.reflect(personaId, personaAuthor).catch(() => undefined);
+      }
     } catch (e) {
       this.logger.warn(`live memory extract failed: ${e instanceof Error ? e.message : String(e)}`);
     }
+  }
+
+  /**
+   * Consolidate recent episodic memories into up to 5 higher-level BELIEFS
+   * (Generative-Agents reflection) — "gets anxious before exams", "teases when
+   * affectionate". These are what make a knower say "that's them" (personality,
+   * not trivia); retrieval boosts kind='reflection'. Never throws; off the hot path.
+   */
+  async reflect(personaId: string, personaAuthor: string): Promise<void> {
+    try {
+      if (!hasApiKey()) return;
+      const rows = await this.prisma.memory.findMany({
+        where: { personaId, kind: { not: 'reflection' } },
+        orderBy: { id: 'desc' },
+        take: 60,
+        select: { text: true },
+      });
+      if (rows.length < 12) return;
+      const existing = await this.prisma.memory.findMany({
+        where: { personaId, kind: 'reflection' },
+        orderBy: { id: 'desc' },
+        take: 40,
+        select: { text: true },
+      });
+      const seen = new Set(existing.map((m) => normKey(m.text)));
+
+      const insights = await this.reflectExtract(personaAuthor, rows.map((r) => r.text));
+      const now = new Date();
+      const date = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+      const fresh: MemoryItem[] = [];
+      for (const ins of insights) {
+        if (!ins || typeof ins.text !== 'string') continue;
+        const text = ins.text.trim();
+        if (text.length < 8) continue;
+        const key = normKey(text);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        fresh.push({ text, keywords: Array.isArray(ins.keywords) ? ins.keywords : [], date });
+        if (fresh.length >= 5) break;
+      }
+      if (!fresh.length) return;
+
+      await this.prisma.memory.createMany({
+        data: fresh.map((m) => ({
+          personaId,
+          text: m.text,
+          keywords: JSON.stringify(m.keywords ?? []),
+          date,
+          importance: 8, // beliefs are high-value for retrieval
+          kind: 'reflection',
+          source: 'reflection',
+        })),
+      });
+      this.logger.log(`reflection: +${fresh.length} beliefs for persona ${personaId}`);
+      void this.backfillEmbeddings(personaId).catch(() => undefined);
+    } catch (e) {
+      this.logger.warn(`reflection failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  private async reflectExtract(personaAuthor: string, memTexts: string[]): Promise<MemoryItem[]> {
+    const items = await completeJson<MemoryItem[]>({
+      model: EXTRACT_MODEL,
+      maxTokens: 700,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You are a reflective memory system. From a list of memories about ONE person, infer up to 5 higher-level, durable INSIGHTS about who they are: personality patterns, how they relate to others, recurring feelings or themes. Every insight MUST be supported by the memories — never invent. Write from the person\'s point of view, in the dominant language of the memories. Return ONLY a valid JSON array.',
+        },
+        {
+          role: 'user',
+          content: `Memories about "${personaAuthor}":\n${memTexts.map((t) => `- ${t}`).join('\n')}\n\nReturn up to 5 insights as JSON:\n[{"text": "one durable insight about ${personaAuthor}", "keywords": ["3-6 lowercase keywords"]}]`,
+        },
+      ],
+    });
+    return Array.isArray(items) ? items : [];
   }
 
   /**

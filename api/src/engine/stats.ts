@@ -16,6 +16,18 @@ export function detectLang(s: string): string {
   return 'en';
 }
 
+/** True if the message mixes Cyrillic and Latin words (intra-message code-switch). */
+export function isCodeSwitched(text: string): boolean {
+  let hasCyr = false;
+  let hasLat = false;
+  for (const w of text.split(/\s+/)) {
+    if (/[Ѐ-ӿ]/.test(w)) hasCyr = true;
+    if (/[a-zA-Z]/.test(w)) hasLat = true;
+    if (hasCyr && hasLat) return true;
+  }
+  return false;
+}
+
 function median(nums: number[]): number {
   if (!nums.length) return 0;
   const s = [...nums].sort((a, b) => a - b);
@@ -37,6 +49,7 @@ export function computeStats(messages: Msg[]): CorpusStats {
     let emojiTotal = 0;
     let noPeriod = 0;
     let brackets = 0;
+    let switched = 0;
     for (const m of texts) {
       for (const e of m.text.match(EMOJI_RE) ?? []) {
         emojiTotal++;
@@ -44,6 +57,7 @@ export function computeStats(messages: Msg[]): CorpusStats {
       }
       if (!/[.!?…]$/.test(m.text)) noPeriod++;
       if (/\){1,}/.test(m.text)) brackets++;
+      if (isCodeSwitched(m.text)) switched++;
     }
     // burst = consecutive messages by same author in the global stream
     const sorted = [...messages].sort((a, b) => a.ts - b.ts);
@@ -67,6 +81,7 @@ export function computeStats(messages: Msg[]): CorpusStats {
       noTrailingPeriod: texts.length ? +(noPeriod / texts.length).toFixed(2) : 0,
       bracketSmiles: texts.length ? +(brackets / texts.length).toFixed(2) : 0,
       burstAvg: bursts ? +(msgs.length / bursts).toFixed(1) : 0,
+      codeSwitch: texts.length ? +(switched / texts.length).toFixed(2) : 0,
     };
   }
 

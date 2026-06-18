@@ -6,6 +6,7 @@ import { AvatarService } from './avatar.service';
 import type { Corpus, CorpusStats, MemoryItem, PersonaCard } from '../engine/types';
 import { buildPersonaCard, extractMemories } from '../engine/extract';
 import { pickExemplars } from '../engine/exemplars';
+import { mineSignaturePhrases } from '../engine/phrases';
 import { complete, completeJson, EXTRACT_MODEL, hasApiKey } from '../engine/llm';
 import { describeLangMix } from '../engine/stats';
 import { tokens } from '../engine/prompt';
@@ -94,6 +95,13 @@ export class BuildService {
       await delay(300);
       demo = true;
     }
+
+    // Mine distinctive signature phrases deterministically (no LLM) from the real
+    // chat — greetings/sign-offs/fillers/laugh tokens the LLM extractor misses.
+    card.signature_phrases = mineSignaturePhrases(
+      collectAuthorTexts(conversations, personaAuthor),
+      collectAuthorTexts(conversations, userAuthor),
+    );
 
     // Infer voice gender (drives the preset TTS fallback). Cheap one-token
     // classification when a key is present; defaults to 'female' if unknown.
@@ -354,6 +362,17 @@ function sanitizeRoutine(rows: Array<Partial<RoutineBlock>>): RoutineBlock[] {
       arousal: typeof r.arousal === 'number' ? Math.max(-1, Math.min(1, r.arousal)) : 0,
     }))
     .filter((r) => r.label);
+}
+
+/** All text-message strings by one author across the corpus. */
+function collectAuthorTexts(conversations: Corpus['conversations'], author: string): string[] {
+  const out: string[] = [];
+  for (const c of conversations) {
+    for (const m of c.messages) {
+      if (m.author === author && m.kind === 'text' && m.text) out.push(m.text);
+    }
+  }
+  return out;
 }
 
 /** Per-hour message counts (0..23, UTC) for the persona — owl/lark + tz signal. */

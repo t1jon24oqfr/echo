@@ -1,5 +1,6 @@
 import type { Conversation } from './types';
 import { renderConv } from './segment';
+import { isCodeSwitched } from './stats';
 
 // Pick 15-30 representative snippets where the persona actually talks,
 // spread across the whole time range (IMPersona used 15-38-message curated snippets).
@@ -20,13 +21,21 @@ export function pickExemplars(convs: Conversation[], personaAuthor: string, targ
 }
 
 function windowAroundPersona(conv: Conversation, personaAuthor: string): string {
-  // Take a 6-12 message window that contains the densest persona activity.
+  // Take a 6-12 message window. Score by persona density PLUS small bonuses for
+  // register variety (code-switching, a longer/emotional line) so exemplars don't
+  // all collapse to the same terse densest-window register (N5).
   const msgs = conv.messages.filter((m) => m.kind === 'text');
   const W = Math.min(12, msgs.length);
   let bestStart = 0;
   let bestScore = -1;
   for (let i = 0; i + W <= msgs.length; i++) {
-    const score = msgs.slice(i, i + W).filter((m) => m.author === personaAuthor).length;
+    let score = 0;
+    for (const m of msgs.slice(i, i + W)) {
+      if (m.author !== personaAuthor) continue;
+      score += 1;
+      if (isCodeSwitched(m.text)) score += 0.5;
+      if (m.text.split(/\s+/).filter(Boolean).length >= 12) score += 0.5;
+    }
     if (score > bestScore) {
       bestScore = score;
       bestStart = i;
