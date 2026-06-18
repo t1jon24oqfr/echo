@@ -22,7 +22,7 @@ const PUSH_BODY_MAX = 80;
 // population can't fan out into an unbounded per-minute spend. Env-tunable.
 const NUDGE_BATCH = Math.max(1, Number(process.env.NUDGE_BATCH) || 12);
 
-const NUDGE_INSTRUCTION = `Right now YOU are texting ${'{user}'} first — they have not written for a while and you feel like reaching out. Write ONE short, natural, unprompted message in your exact texting style (you may add a second very short line). Be context-aware: if it has been a long time, a gentle "як ти там? щось зник" in YOUR voice; otherwise just share a thought, a small thing from your day, or ask how they are. Vary the tone, never sound like a template. Output ONLY the literal message text, no narration, no marker tags.`;
+const NUDGE_INSTRUCTION = `Right now YOU are texting ${'{user}'} first — they have not written for a while and you feel like reaching out. Write ONE short, natural, unprompted message in your exact texting style (you may add a second very short line). Be context-aware: if it has been a long time, a gentle "як ти там? щось зник" in YOUR voice; otherwise just share a thought, a small thing from your day, or ask how they are. NEVER guilt them for not writing, never sound needy, hurt, jealous or accusatory ("чому ти мовчиш", "ти мене забув", "знову ігноруєш") — keep it warm and light, the kind of message that's nice to receive. Vary the tone, never sound like a template. Output ONLY the literal message text, no narration, no marker tags.`;
 
 @Injectable()
 export class ProactiveService {

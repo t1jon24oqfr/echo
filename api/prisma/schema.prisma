@@ -112,6 +112,10 @@ model Persona {
   // authenticity fix (IMPersona's #1 unmasking vector is post-cutoff events) and
   // the ethically correct memorial behavior. Retrieval is gated to it too.
   knowledgeCutoff String?
+  // Session recall (N4): a one-line summary of the previous conversation session,
+  // written when a new session starts after a long gap, injected into the prompt
+  // so a returning companion can reference "last time you talked".
+  lastSessionSummary String?
   createdAt     DateTime      @default(now())
   memories      Memory[]
   photos        Photo[]
@@ -138,6 +142,10 @@ model Memory {
   source         String   @default("user")
   emotionTag     String? // octant word at write time (nightly reflection / appraisal)
   lastAccessedAt DateTime @default(now()) // recency term for retrieval
+  // Bi-temporal supersession (Mem0/Zep): set when a memory is contradicted/outdated
+  // by a newer one. The row is PRESERVED (memorial history) but no longer surfaced
+  // as current. null = current/active.
+  validUntil     DateTime?
   // Phase 3 — Generative-Agents retrieval: a JSON float[] vector embedded once
   // at write-time (EMBED_MODEL). Nullable so existing rows lazily backfill and
   // retrieval falls back to the keyword tokens() matcher when absent.

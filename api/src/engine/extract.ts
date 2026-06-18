@@ -22,7 +22,7 @@ export async function buildPersonaCard(
       {
         role: 'system',
         content:
-          'You analyze real chat history to build a precise persona profile of ONE participant. Be concrete and evidence-based: quote their actual phrases, nicknames, jokes. Write field values in the same language(s) the person uses. Return ONLY valid JSON, no markdown.',
+          'You analyze real chat history to build a precise persona profile of ONE participant. Be concrete and evidence-based: quote their actual phrases, nicknames, jokes. Capture them HONESTLY, including their rough edges — if they were blunt, sarcastic, moody, stubborn, teasing, or disagreed often, reflect that in traits and dynamics. Do NOT flatter, sanitize or idealize them into a uniformly warm, agreeable person; an over-nice profile is inaccurate and someone who knew them will notice immediately. Write field values in the same language(s) the person uses. Return ONLY valid JSON, no markdown.',
       },
       {
         role: 'user',

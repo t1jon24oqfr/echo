@@ -8,7 +8,7 @@ import { SelfieService } from './selfie.service';
 import { MemoryService } from './memory.service';
 import type { CorpusStats, MemoryItem, PersonaCard, PersonaFile } from '../engine/types';
 import type { ChatMessage as LlmMessage } from '../engine/llm';
-import { CHAT_MODEL, hasApiKey, streamChat } from '../engine/llm';
+import { CHAT_MODEL, complete, EXTRACT_MODEL, hasApiKey, streamChat } from '../engine/llm';
 import { buildSystemPrompt, retrieveMemories } from '../engine/prompt';
 import { parsePassport } from '../engine/passport';
 import { PersonaStateService, type AffectInput, type StateSnapshot } from './persona-state.service';
@@ -31,6 +31,9 @@ import { hasSttKey, SttUnavailableError, transcribeAudio } from '../engine/stt';
 import { hasTtsKey, synthesizeSpeech, TtsUnavailableError } from '../engine/tts';
 
 const HISTORY_LIMIT = 30;
+// A gap longer than this (days) starts a new "session" — on the first message
+// after it we summarize the previous session and let the persona reference it.
+const SESSION_GAP_DAYS = 0.5;
 const SELFIE_MARKER = /\[\[SELFIE:\s*([^\]]*)\]\]/i;
 // Matches the canonical [[VOICE]] marker and the colon-variant the model
 // occasionally improvises ([[VOICE: warm, teasing]]) — both must be stripped,
@@ -161,6 +164,15 @@ export class ChatService {
     // current-activity lookup is warm for this + subsequent reads. Fire-and-forget.
     void this.agenda.ensureToday(personaId).catch(() => undefined);
 
+    // Session recall (N4): on the first message after a long gap, summarize the
+    // PREVIOUS session so the persona can reference it ("earlier you talked
+    // about…"). Synchronous but rare (only at a session boundary).
+    let sessionRecap = persona.lastSessionSummary ?? undefined;
+    if (gapDays > SESSION_GAP_DAYS && persona.lastUserAt) {
+      const fresh = await this.summarizePriorSession(personaId).catch(() => null);
+      if (fresh) sessionRecap = fresh;
+    }
+
     // Compute-on-read the LIVE state ONCE for this request (optimistic-lock write)
     // and feed it into the prompt so presence / tone / activity all agree.
     let live: ReturnType<PersonaStateService['toLiveState']> | undefined;
@@ -245,6 +257,9 @@ export class ChatService {
     if (farewell) {
       system +=
         '\n\nThe other person is saying goodbye. Reply with a warm, brief, genuine close that respects them leaving. Do NOT guilt them, do NOT say "don\'t go" or "stay", do NOT create FOMO or re-ask if they\'re sure, do NOT act needy or jealous. One short line is enough.';
+    }
+    if (sessionRecap && gapDays > SESSION_GAP_DAYS) {
+      system += `\n\n(Earlier you two talked about: ${sessionRecap}. You may pick up from that naturally if it fits — don't force it.)`;
     }
     // One-shot debug: confirm the assembled prompt carries the passport-driven
     // state block (guard + register + baseline hint). Gate behind DEBUG_PROMPT so
@@ -604,6 +619,51 @@ export class ChatService {
     return rows.reverse();
   }
 
+  /**
+   * Summarize the PREVIOUS session (the messages before the just-sent one) into a
+   * single short line and store it on the persona. Called only at a session
+   * boundary. Returns the summary (also persisted) or null. Never throws.
+   */
+  private async summarizePriorSession(personaId: string): Promise<string | null> {
+    try {
+      if (!hasApiKey()) return null;
+      const rows = await this.prisma.chatMessage.findMany({
+        where: { personaId },
+        orderBy: { createdAt: 'desc' },
+        take: 26,
+        select: { role: true, content: true, transcript: true },
+      });
+      // Drop the newest message (the user's current opener) → the prior session.
+      const prior = rows.slice(1).reverse();
+      const lines = prior
+        .map((m) => `${m.role === 'user' ? 'them' : 'you'}: ${(m.content || m.transcript || '').slice(0, 200)}`)
+        .filter((l) => l.length > 6);
+      if (lines.length < 3) return null;
+      const summary = await complete({
+        model: EXTRACT_MODEL,
+        maxTokens: 80,
+        temperature: 0.3,
+        messages: [
+          {
+            role: 'system',
+            content:
+              'Summarize what these two people talked about in ONE short sentence (max ~18 words), in the dominant language of the chat, plain past tense, no names, just the gist. Output only the sentence.',
+          },
+          { role: 'user', content: lines.join('\n') },
+        ],
+      });
+      const s = summary.trim().replace(/\s+/g, ' ').slice(0, 240);
+      if (!s) return null;
+      await this.prisma.persona
+        .update({ where: { id: personaId }, data: { lastSessionSummary: s } })
+        .catch(() => undefined);
+      return s;
+    } catch (e) {
+      this.logger.warn(`session summary failed: ${e instanceof Error ? e.message : String(e)}`);
+      return null;
+    }
+  }
+
   private async loadPersonaFile(persona: Persona): Promise<PersonaFile> {
     const card = parseJson<PersonaCard>(persona.card);
     const exemplars = parseJson<string[]>(persona.exemplars) ?? [];
@@ -611,7 +671,11 @@ export class ChatService {
     if (!card || !stats || !persona.personaAuthor || !persona.userAuthor) {
       throw new BadRequestException('Persona data is incomplete — rebuild it');
     }
-    const rows = await this.prisma.memory.findMany({ where: { personaId: persona.id } });
+    // Only CURRENT memories (validUntil null) reach the prompt — superseded ones
+    // are preserved in the DB (memorial history) but never surfaced as fact (N6).
+    const rows = await this.prisma.memory.findMany({
+      where: { personaId: persona.id, validUntil: null },
+    });
     const memories: MemoryItem[] = rows.map((m) => {
       const emb = parseEmbedding(m.embedding);
       return {

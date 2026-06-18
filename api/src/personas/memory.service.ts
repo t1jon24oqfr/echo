@@ -163,10 +163,10 @@ export class MemoryService {
     try {
       if (!hasApiKey()) return;
       const rows = await this.prisma.memory.findMany({
-        where: { personaId, kind: { not: 'reflection' } },
+        where: { personaId, kind: { not: 'reflection' }, validUntil: null },
         orderBy: { id: 'desc' },
         take: 60,
-        select: { text: true },
+        select: { id: true, text: true },
       });
       if (rows.length < 12) return;
       const existing = await this.prisma.memory.findMany({
@@ -177,7 +177,17 @@ export class MemoryService {
       });
       const seen = new Set(existing.map((m) => normKey(m.text)));
 
-      const insights = await this.reflectExtract(personaAuthor, rows.map((r) => r.text));
+      const { insights, outdated } = await this.reflectExtract(personaAuthor, rows);
+
+      // Bi-temporal supersession (N6/Mem0): close validUntil on memories the model
+      // flagged as outdated/contradicted by a newer one. Row is preserved (memorial
+      // history) but no longer surfaced as current.
+      if (outdated.length) {
+        await this.prisma.memory
+          .updateMany({ where: { id: { in: outdated }, personaId }, data: { validUntil: new Date() } })
+          .catch(() => undefined);
+        this.logger.log(`reflection: superseded ${outdated.length} stale memories for ${personaId}`);
+      }
       const now = new Date();
       const date = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
       const fresh: MemoryItem[] = [];
@@ -211,23 +221,32 @@ export class MemoryService {
     }
   }
 
-  private async reflectExtract(personaAuthor: string, memTexts: string[]): Promise<MemoryItem[]> {
-    const items = await completeJson<MemoryItem[]>({
+  private async reflectExtract(
+    personaAuthor: string,
+    rows: { id: string; text: string }[],
+  ): Promise<{ insights: MemoryItem[]; outdated: string[] }> {
+    const numbered = rows.map((r, i) => `[${i}] ${r.text}`).join('\n');
+    const out = await completeJson<{ insights?: MemoryItem[]; outdated?: number[] }>({
       model: EXTRACT_MODEL,
-      maxTokens: 700,
+      maxTokens: 800,
       messages: [
         {
           role: 'system',
           content:
-            'You are a reflective memory system. From a list of memories about ONE person, infer up to 5 higher-level, durable INSIGHTS about who they are: personality patterns, how they relate to others, recurring feelings or themes. Every insight MUST be supported by the memories — never invent. Write from the person\'s point of view, in the dominant language of the memories. Return ONLY a valid JSON array.',
+            'You are a reflective memory system. Do TWO things over a numbered list of memories about ONE person. (1) Infer up to 5 higher-level, durable INSIGHTS about who they are: personality patterns, how they relate to others, recurring feelings or themes. Every insight MUST be supported by the memories — never invent. (2) Identify the NUMBERS of any memories that are now OUTDATED or directly CONTRADICTED by a newer memory in the list (e.g. "[3] works at X" superseded by "[9] left X"). Be conservative — only clear contradictions. Write insights from the person\'s point of view in the dominant language. Return ONLY valid JSON.',
         },
         {
           role: 'user',
-          content: `Memories about "${personaAuthor}":\n${memTexts.map((t) => `- ${t}`).join('\n')}\n\nReturn up to 5 insights as JSON:\n[{"text": "one durable insight about ${personaAuthor}", "keywords": ["3-6 lowercase keywords"]}]`,
+          content: `Memories about "${personaAuthor}":\n${numbered}\n\nReturn JSON exactly:\n{"insights": [{"text": "one durable insight about ${personaAuthor}", "keywords": ["3-6 lowercase keywords"]}], "outdated": [numbers of superseded memories, or []]}`,
         },
       ],
     });
-    return Array.isArray(items) ? items : [];
+    const insights = Array.isArray(out?.insights) ? out.insights : [];
+    const idx = Array.isArray(out?.outdated) ? out.outdated : [];
+    const outdated = idx
+      .filter((n) => Number.isInteger(n) && n >= 0 && n < rows.length)
+      .map((n) => rows[n].id);
+    return { insights, outdated };
   }
 
   /**
