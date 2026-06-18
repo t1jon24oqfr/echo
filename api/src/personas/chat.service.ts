@@ -210,6 +210,13 @@ export class ChatService {
     void this.memory.touchAccessed(retrieved.map((m) => m.id).filter((x): x is string => !!x));
     void this.memory.backfillEmbeddings(personaId).catch(() => undefined);
 
+    // N12 — situation-matched real replies: how this person ACTUALLY answered a
+    // similar message (kNN-LM grounding). Lazy-embed the rest for next time.
+    const replyExemplars = await this.memory
+      .retrieveReplyExemplars(personaId, turnContent, queryEmbedding, 2)
+      .catch(() => [] as { context: string; reply: string }[]);
+    void this.memory.backfillReplyEmbeddings(personaId).catch(() => undefined);
+
     // --- Behavior layer (Phase 3 §6): pure state-driven micro-behaviors. The
     // seeded day-rng makes a persona-day reproducible/testable. Computed from the
     // live snapshot + passport knobs + the inbound message type. ---
@@ -260,6 +267,13 @@ export class ChatService {
     }
     if (sessionRecap && gapDays > SESSION_GAP_DAYS) {
       system += `\n\n(Earlier you two talked about: ${sessionRecap}. You may pick up from that naturally if it fits — don't force it.)`;
+    }
+    if (replyExemplars.length) {
+      system +=
+        '\n\nHow you ACTUALLY replied to similar messages before (match this voice + length, do NOT copy verbatim):\n' +
+        replyExemplars
+          .map((e) => `— they said "${e.context}" → you replied "${e.reply.replace(/\n/g, ' / ')}"`)
+          .join('\n');
     }
     // One-shot debug: confirm the assembled prompt carries the passport-driven
     // state block (guard + register + baseline hint). Gate behind DEBUG_PROMPT so

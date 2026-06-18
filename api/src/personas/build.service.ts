@@ -133,6 +133,16 @@ export class BuildService {
       }),
     ]);
 
+    // N12: store situation-matched reply exemplars (real context→reply pairs) for
+    // kNN-LM retrieval at chat time. Embeddings are lazy-backfilled like memories.
+    const replyPairs = collectReplyPairs(conversations, personaAuthor, 120);
+    await this.prisma.replyExemplar.deleteMany({ where: { personaId } });
+    if (replyPairs.length) {
+      await this.prisma.replyExemplar.createMany({
+        data: replyPairs.map((p) => ({ personaId, context: p.context, reply: p.reply })),
+      });
+    }
+
     // Character Passport auto-fill (Phase 1): ONE extra DeepSeek analysis over
     // the same sample for ocean/chronotype/routine, mirrored style from card +
     // stats. Best-effort — NEVER fails the build (heuristic neutral fallback).
@@ -362,6 +372,39 @@ function sanitizeRoutine(rows: Array<Partial<RoutineBlock>>): RoutineBlock[] {
       arousal: typeof r.arousal === 'number' ? Math.max(-1, Math.min(1, r.arousal)) : 0,
     }))
     .filter((r) => r.label);
+}
+
+/** (incoming user turn → real persona reply) pairs, spread/sampled to a cap. */
+export function collectReplyPairs(
+  conversations: Corpus['conversations'],
+  personaAuthor: string,
+  cap: number,
+): { context: string; reply: string }[] {
+  const pairs: { context: string; reply: string }[] = [];
+  for (const c of conversations) {
+    const msgs = c.messages.filter((m) => m.kind === 'text' && m.text.trim());
+    for (let i = 1; i < msgs.length; i++) {
+      if (msgs[i].author !== personaAuthor) continue;
+      if (msgs[i - 1].author === personaAuthor) continue; // need a user turn before
+      const context = msgs[i - 1].text.trim();
+      let j = i;
+      const burst: string[] = [msgs[i].text.trim()];
+      while (j + 1 < msgs.length && msgs[j + 1].author === personaAuthor && burst.length < 3) {
+        burst.push(msgs[j + 1].text.trim());
+        j++;
+      }
+      const reply = burst.join('\n').trim();
+      if (context.length >= 2 && reply.length >= 2) {
+        pairs.push({ context: context.slice(0, 400), reply: reply.slice(0, 400) });
+      }
+      i = j;
+    }
+  }
+  if (pairs.length <= cap) return pairs;
+  const step = pairs.length / cap; // even spread across the whole history
+  const out: { context: string; reply: string }[] = [];
+  for (let k = 0; k < cap; k++) out.push(pairs[Math.floor(k * step)]);
+  return out;
 }
 
 /** All text-message strings by one author across the corpus. */

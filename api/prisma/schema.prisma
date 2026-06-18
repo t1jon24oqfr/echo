@@ -112,6 +112,7 @@ model Persona {
   // authenticity fix (IMPersona's #1 unmasking vector is post-cutoff events) and
   // the ethically correct memorial behavior. Retrieval is gated to it too.
   knowledgeCutoff String?
+  replyExemplars ReplyExemplar[]
   // Session recall (N4): a one-line summary of the previous conversation session,
   // written when a new session starts after a long gap, injected into the prompt
   // so a returning companion can reference "last time you talked".
@@ -151,6 +152,21 @@ model Memory {
   // retrieval falls back to the keyword tokens() matcher when absent.
   embedding      String? // JSON number[] embedding vector
   createdAt      DateTime @default(now())
+}
+
+// N12 — situation-matched real-reply exemplars (kNN-LM grounding). At chat time
+// we retrieve the persona's ACTUAL past replies whose preceding context is closest
+// to the current turn and show them as ground truth for "how you really replied".
+model ReplyExemplar {
+  id        String  @id @default(cuid())
+  personaId String
+  persona   Persona @relation(fields: [personaId], references: [id], onDelete: Cascade)
+  context   String // the incoming user turn that preceded the reply
+  reply     String // the persona's real reply (may be a short burst joined by \n)
+  embedding String? // JSON number[] of the context (lazy-backfilled like Memory)
+  createdAt DateTime @default(now())
+
+  @@index([personaId])
 }
 
 model Photo {

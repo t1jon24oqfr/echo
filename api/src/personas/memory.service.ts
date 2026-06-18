@@ -2,7 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { completeJson, EXTRACT_MODEL, hasApiKey } from '../engine/llm';
 import type { MemoryItem } from '../engine/types';
-import { embedText, hasEmbedKey, serializeEmbedding } from '../engine/embeddings';
+import { cosine, embedText, hasEmbedKey, parseEmbedding, serializeEmbedding } from '../engine/embeddings';
+import { tokens } from '../engine/prompt';
 
 const RECENT_WINDOW = 50; // how many recent memories to dedupe against
 const MAX_NEW_PER_TURN = 3; // cap per completed exchange
@@ -308,6 +309,72 @@ export class MemoryService {
     await this.prisma.memory
       .updateMany({ where: { id: { in: real } }, data: { lastAccessedAt: new Date() } })
       .catch(() => undefined);
+  }
+
+  /** Lazily embed reply-exemplar contexts that lack an embedding (N12; bounded). */
+  async backfillReplyEmbeddings(personaId: string, max = 20): Promise<number> {
+    if (!hasEmbedKey()) return 0;
+    const rows = await this.prisma.replyExemplar.findMany({
+      where: { personaId, embedding: null },
+      orderBy: { id: 'desc' },
+      take: max,
+      select: { id: true, context: true },
+    });
+    if (!rows.length) return 0;
+    let n = 0;
+    for (const row of rows) {
+      try {
+        const vec = await embedText(row.context);
+        await this.prisma.replyExemplar.update({
+          where: { id: row.id },
+          data: { embedding: serializeEmbedding(vec) },
+        });
+        n++;
+      } catch {
+        break; // transport failure — retry later
+      }
+    }
+    return n;
+  }
+
+  /**
+   * N12 — retrieve up to k of the persona's REAL (context→reply) pairs whose
+   * preceding context is closest to the current turn (cosine when embedded, else
+   * keyword overlap). Shows the model how this person ACTUALLY replied to a
+   * similar message — kNN-LM grounding. Never throws.
+   */
+  async retrieveReplyExemplars(
+    personaId: string,
+    query: string,
+    queryEmbedding?: number[] | null,
+    k = 2,
+  ): Promise<{ context: string; reply: string }[]> {
+    try {
+      const rows = await this.prisma.replyExemplar.findMany({ where: { personaId }, take: 400 });
+      if (!rows.length) return [];
+      const useEmb = Array.isArray(queryEmbedding) && queryEmbedding.length > 0;
+      const qtok = new Set(tokens(query));
+      const scored = rows.map((r) => {
+        const emb = parseEmbedding(r.embedding);
+        let score: number;
+        if (useEmb && emb && emb.length === queryEmbedding!.length) {
+          score = cosine(queryEmbedding!, emb);
+        } else {
+          const ct = new Set(tokens(r.context));
+          let o = 0;
+          for (const t of qtok) if (ct.has(t)) o++;
+          score = o;
+        }
+        return { r, score };
+      });
+      scored.sort((a, b) => b.score - a.score);
+      return scored
+        .slice(0, k)
+        .filter((x) => x.score > 0)
+        .map((x) => ({ context: x.r.context, reply: x.r.reply }));
+    } catch {
+      return [];
+    }
   }
 
   /**
