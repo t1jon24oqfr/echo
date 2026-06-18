@@ -9,6 +9,8 @@
     "typecheck": "tsc --noEmit",
     "prisma:migrate": "prisma migrate dev",
     "eval:persona": "node dist/eval/eval-persona.js",
+    "replay:persona": "node dist/eval/replay-persona.js",
+    "lora:dataprep": "node dist/eval/lora-dataprep.js",
     "test": "node --test \"test/*.test.ts\""
   },
   "dependencies": {
