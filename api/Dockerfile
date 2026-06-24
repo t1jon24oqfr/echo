@@ -26,8 +26,8 @@ RUN npm ci
 # sharp to 0.33.5 and build it from source against the system libvips. 0.33.5's
 # API (greyscale/resize/composite/metadata/failOn) matches this codebase.
 RUN rm -rf node_modules/@img node_modules/sharp \
-  && SHARP_FORCE_GLOBAL_LIBVIPS=1 npm install --no-save --build-from-source --foreground-scripts \
-       node-addon-api node-gyp sharp@0.33.5 \
+  && SHARP_FORCE_GLOBAL_LIBVIPS=1 CXXFLAGS="-std=c++17" npm install --no-save --build-from-source --foreground-scripts \
+       sharp@0.33.5 \
   && node -e "console.log('sharp libvips', require('sharp').versions.vips)"
 
 COPY prisma ./prisma
