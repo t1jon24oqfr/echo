@@ -3,7 +3,9 @@
 # slim runtime that ships ffmpeg (visual-import frame extraction) + sharp libs.
 
 # ---------- builder ----------
-FROM node:22-slim AS builder
+# Trixie (Debian 13) ships libvips 8.16.1 — required to source-build sharp 0.33.5
+# (which needs libvips >= 8.15.3). Bookworm's 8.14 is too old. See sharp fix below.
+FROM node:22-trixie-slim AS builder
 WORKDIR /app
 
 # OpenSSL is needed by the Prisma engine during `prisma generate`.
@@ -38,14 +40,15 @@ COPY src ./src
 RUN npm run build
 
 # ---------- runtime ----------
-FROM node:22-slim AS runtime
+FROM node:22-trixie-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
 # ffmpeg/ffprobe = visual-import frame extraction; openssl = Prisma engine;
-# libvips42 = the shared lib the source-built sharp 0.33.5 links against at runtime.
+# libvips42t64 = the shared lib the source-built sharp 0.33.5 links against at
+# runtime (Trixie's t64 ABI-transition name for libvips42).
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ffmpeg openssl ca-certificates libvips42 \
+  && apt-get install -y --no-install-recommends ffmpeg openssl ca-certificates libvips42t64 \
   && rm -rf /var/lib/apt/lists/*
 
 # Copy the builder's node_modules verbatim: it already holds the generated
