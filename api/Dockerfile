@@ -47,8 +47,9 @@ ENV NODE_ENV=production
 # ffmpeg/ffprobe = visual-import frame extraction; openssl = Prisma engine;
 # libvips42t64 = the shared lib the source-built sharp 0.33.5 links against at
 # runtime (Trixie's t64 ABI-transition name for libvips42).
+# curl is also used by the platform health check (Coolify/DO probe GET /health).
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ffmpeg openssl ca-certificates libvips42t64 \
+  && apt-get install -y --no-install-recommends ffmpeg openssl ca-certificates libvips42t64 curl \
   && rm -rf /var/lib/apt/lists/*
 
 # Copy the builder's node_modules verbatim: it already holds the generated
