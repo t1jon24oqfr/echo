@@ -45,6 +45,8 @@ const ALLOWED_MIME: Record<string, string> = {
   'image/jpeg': '.jpg',
   'image/png': '.png',
   'image/webp': '.webp',
+  'image/heic': '.heic',
+  'image/heif': '.heif',
 };
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
 
