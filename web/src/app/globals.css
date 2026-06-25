@@ -292,3 +292,112 @@ img {
     -webkit-backdrop-filter: none;
   }
 }
+
+/* ============================================================
+   Landing — hero motif, animated chat demo + scroll-reveal
+   (the existing reduced-motion rule above only names page-enter/
+   bubble-in/pop-in/ambient-blob/skeleton, so every new keyframe
+   gets its guard explicitly at the bottom of this block.)
+   ============================================================ */
+
+/* Staggered entrance for the hero stack (lines, subtitle, mockup). */
+.hero-rise {
+  animation: page-enter 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Echo motif: kicker mark pulse (decorative, gentle loop). */
+@keyframes echo-pulse {
+  0% { transform: scale(1); opacity: 0.85; }
+  70% { transform: scale(1.18); opacity: 0; }
+  100% { transform: scale(1.18); opacity: 0; }
+}
+.echo-mark-arc {
+  transform-origin: center;
+  transform-box: fill-box;
+  animation: echo-pulse 4s ease-out infinite;
+}
+
+/* Whisper-quiet background echo rings behind the hero (7s expand+fade). */
+@keyframes echo-ring {
+  0% { transform: scale(0.6); opacity: 0.06; }
+  80% { transform: scale(1.25); opacity: 0; }
+  100% { transform: scale(1.25); opacity: 0; }
+}
+.echo-bg-ring {
+  transform-origin: center;
+  animation: echo-ring 7s ease-out infinite;
+}
+
+/* One-shot presence ripple off the demo avatar when it comes online. */
+@keyframes echo-avatar-ripple {
+  0% { transform: scale(1); opacity: 0.5; }
+  100% { transform: scale(2.1); opacity: 0; }
+}
+.echo-avatar-ripple {
+  animation: echo-avatar-ripple 1.4s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* Demo typing dots (own keyframe so the reduced-motion guard names it). */
+@keyframes echo-dot {
+  0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-3px); }
+}
+.echo-typing-dot {
+  display: inline-block;
+  animation: echo-dot 1.2s infinite ease-in-out;
+}
+
+/* Blinking type-out caret. */
+@keyframes echo-caret-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+.echo-caret {
+  animation: echo-caret-blink 0.9s step-end infinite;
+}
+
+/* Scroll-reveal utility: sections start hidden, settle on .reveal-in;
+   direct children stagger via nth-child delay. */
+[data-reveal] {
+  opacity: 0;
+  transform: translateY(14px);
+  transition: opacity 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+[data-reveal].reveal-in {
+  opacity: 1;
+  transform: translateY(0);
+}
+[data-reveal].reveal-in > * {
+  transition-delay: 0ms;
+}
+[data-reveal].reveal-in > *:nth-child(2) { transition-delay: 70ms; }
+[data-reveal].reveal-in > *:nth-child(3) { transition-delay: 140ms; }
+[data-reveal].reveal-in > *:nth-child(4) { transition-delay: 210ms; }
+
+/* One-shot illustration grow-in, fired when a section gets .reveal-in. */
+@keyframes echo-grow-in {
+  from { transform: scaleY(0.2); opacity: 0; }
+  to { transform: scaleY(1); opacity: 1; }
+}
+.reveal-in .echo-bar {
+  animation: echo-grow-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+  transform-origin: bottom;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-rise,
+  .echo-mark-arc,
+  .echo-bg-ring,
+  .echo-avatar-ripple,
+  .echo-typing-dot,
+  .echo-caret,
+  .reveal-in .echo-bar {
+    animation: none;
+  }
+  [data-reveal] {
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
+  }
+}
