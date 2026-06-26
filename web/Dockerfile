@@ -37,5 +37,15 @@ COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 
 EXPOSE 3047
+
+# Container healthcheck. The node:22-slim runtime ships NO curl/wget, so the
+# platform's default `curl || wget` probe always failed (running:unhealthy even
+# though the app serves 200). Use the bundled node binary to GET / on the local
+# port and exit non-zero on any status >= 400 or connection error. Defining
+# HEALTHCHECK here makes Coolify defer to it (custom_healthcheck_found) instead
+# of injecting its curl/wget CMD-SHELL.
+HEALTHCHECK --interval=10s --timeout=5s --start-period=15s --retries=5 \
+  CMD node -e "require('http').get({host:'127.0.0.1',port:process.env.PORT||3047,path:'/'},r=>process.exit(r.statusCode<400?0:1)).on('error',()=>process.exit(1))"
+
 # server.js is emitted by Next's standalone output; it reads PORT/HOSTNAME.
 CMD ["node", "server.js"]
