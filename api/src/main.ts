@@ -4,11 +4,11 @@ import 'dotenv/config';
 // is unset (see instrument.ts).
 import './instrument';
 import 'reflect-metadata';
-import * as Sentry from '@sentry/node';
 import { ValidationPipe } from '@nestjs/common';
-import { NestFactory } from '@nestjs/core';
+import { HttpAdapterHost, NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import { SentryExceptionFilter } from './sentry-exception.filter';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
@@ -21,11 +21,13 @@ async function bootstrap(): Promise<void> {
     methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   });
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
-  // Capture unhandled exceptions thrown by route handlers and report them to
-  // Sentry/GlitchTip. No-op (handler installed but never reaches Sentry) when
-  // SENTRY_DSN is unset because Sentry.init did not run. Must be registered
-  // after routes/pipes and before app.listen.
-  Sentry.setupExpressErrorHandler(app);
+  // Report unhandled / 5xx errors to Sentry/GlitchTip. NestJS catches
+  // route-handler errors in its own ExceptionsHandler (they never reach the
+  // Express error middleware), so capture must happen inside a Nest filter.
+  // Extends BaseExceptionFilter, so the HTTP response is unchanged. No-op when
+  // SENTRY_DSN is unset because Sentry.init did not run.
+  const { httpAdapter } = app.get(HttpAdapterHost);
+  app.useGlobalFilters(new SentryExceptionFilter(httpAdapter));
   const port = Number(process.env.PORT ?? 3048);
   await app.listen(port);
   // eslint-disable-next-line no-console

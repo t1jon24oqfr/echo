@@ -1,11 +1,13 @@
 // Private smoke-test for Sentry/GlitchTip server-side capture wiring (echo-web).
 //
-// GET /api/_sentry-check?token=<SENTRY_DEBUG_TOKEN> sends one synthetic
+// GET /api/sentry-check?token=<SENTRY_DEBUG_TOKEN> sends one synthetic
 // exception to GlitchTip (server DSN, project /4) and returns 200 — used to
 // PROVE capture works end-to-end after deploy WITHOUT exposing a public crash
 // route. Gated by a constant-time token comparison against SENTRY_DEBUG_TOKEN:
 // when that env is unset the route always 404s, so it is inert in normal
-// operation and cannot be abused from the internet.
+// operation and cannot be abused from the internet. (NOT under a `_`-prefixed
+// folder: Next treats `_name` segments as private and excludes them from
+// routing, so the handler would never be built.)
 import * as Sentry from '@sentry/nextjs';
 import { NextResponse } from 'next/server';
 
