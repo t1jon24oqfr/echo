@@ -33,6 +33,7 @@ import { HealthController } from './health.controller';
 import { MetricsController } from './metrics/metrics.controller';
 import { MetricsService } from './metrics/metrics.service';
 import { MetricsInterceptor } from './metrics/metrics.interceptor';
+import { SentryDebugController } from './debug/sentry-debug.controller';
 import { PrismaService } from './prisma.service';
 
 @Module({
@@ -53,6 +54,7 @@ import { PrismaService } from './prisma.service';
     PushController,
     HealthController,
     MetricsController,
+    SentryDebugController,
   ],
   providers: [
     { provide: APP_GUARD, useClass: IpThrottlerGuard },
