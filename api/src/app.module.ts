@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule } from '@nestjs/throttler';
@@ -30,6 +30,9 @@ import { PushController } from './push/push.controller';
 import { PushService } from './push/push.service';
 import { ResetController } from './reset.controller';
 import { HealthController } from './health.controller';
+import { MetricsController } from './metrics/metrics.controller';
+import { MetricsService } from './metrics/metrics.service';
+import { MetricsInterceptor } from './metrics/metrics.interceptor';
 import { PrismaService } from './prisma.service';
 
 @Module({
@@ -49,9 +52,12 @@ import { PrismaService } from './prisma.service';
     ResetController,
     PushController,
     HealthController,
+    MetricsController,
   ],
   providers: [
     { provide: APP_GUARD, useClass: IpThrottlerGuard },
+    { provide: APP_INTERCEPTOR, useClass: MetricsInterceptor },
+    MetricsService,
     PrismaService,
     DeviceTokenGuard,
     JwtService,
